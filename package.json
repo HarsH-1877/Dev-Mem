@@ -1,0 +1,32 @@
+{
+  "name": "dev-mem",
+  "version": "0.1.0",
+  "description": "Shared, verified development state for coding agents",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "dev-mem": "./dist/cli/index.js"
+  },
+  "exports": {
+    ".": "./dist/core/index.js",
+    "./graph": "./dist/core/graph/index.js",
+    "./capture": "./dist/core/capture/index.js",
+    "./lifecycle": "./dist/core/lifecycle/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}

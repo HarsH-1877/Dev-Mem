@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import {
   assertTransition,
   isLifecycleState,
@@ -86,7 +86,7 @@ function isEdgeType(value: string): value is EdgeType {
  */
 export class GraphStore {
   readonly dbPath: string;
-  private readonly db: DatabaseSync;
+  private readonly db: Database.Database;
 
   constructor(options: GraphStoreOptions = {}) {
     const ephemeral =
@@ -103,7 +103,7 @@ export class GraphStore {
       throw new Error("GraphStore requires projectRoot or dbPath");
     }
 
-    this.db = new DatabaseSync(this.dbPath);
+    this.db = new Database(this.dbPath);
     this.db.exec("PRAGMA foreign_keys = ON");
     this.db.exec(SCHEMA_SQL);
   }

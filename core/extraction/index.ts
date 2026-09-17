@@ -104,6 +104,28 @@ export async function runExtraction(options: ExtractionOptions): Promise<Extract
     const fallbackCommit = headCommit || "0000000000000000000000000000000000000000";
     const fallbackFiles = touchedFilesSet.size > 0 ? Array.from(touchedFilesSet) : ["README.md"];
 
+    // 2b. Fetch existing active nodes for contradiction detection
+    let existingContextStr = "";
+    try {
+      const store = new GraphStore({ projectRoot, ephemeral: mockLlm || process.env.DEV_MEM_MOCK_LLM === "1" });
+      const allNodes = store.queryAllNodes();
+      store.close();
+
+      const candidateNodes = allNodes.filter(n =>
+        (n.type === "Decision" || n.type === "Constraint" || n.type === "Convention") &&
+        n.lifecycle_state !== "stale" &&
+        n.lifecycle_state !== "superseded"
+      );
+
+      if (candidateNodes.length > 0) {
+        existingContextStr = "\nExisting Active Knowledge in Graph:\n" + candidateNodes.map(n =>
+          `[ID: ${n.id}] [${n.type}] ${n.title}`
+        ).join("\n") + "\n";
+      }
+    } catch (err) {
+      // Ignore
+    }
+
     // 3. Format prompt for single batched extraction pass
     const prompt = `You are an automated software architecture and memory extraction engine for coding agents.
 Analyze the following chronological development session events and extract key durable knowledge.
@@ -111,7 +133,7 @@ Analyze the following chronological development session events and extract key d
 Session ID: ${sessionId}
 Agent: ${agent}
 Repository commit: ${fallbackCommit}
-
+${existingContextStr}
 Extract nodes strictly belonging to these types (§5.1):
 - "Decision": Architectural or technical decisions made and why
 - "FailedApproach": Approaches or solutions attempted that did not work, including reasons/errors
@@ -119,6 +141,8 @@ Extract nodes strictly belonging to these types (§5.1):
 - "Discovery": Surprising codebase behavior, root causes, or architectural findings
 - "Convention": Project-specific patterns, commands, or conventions established
 - "OpenIssue": Unresolved problems, regressions, or follow-ups remaining
+
+If any extracted node directly contradicts an existing active knowledge node listed above, include a contradicts_edges entry.
 
 Output strictly a single valid JSON object with the following schema:
 {
@@ -131,6 +155,13 @@ Output strictly a single valid JSON object with the following schema:
       "confidence": 0.0 to 1.0,
       "diff_ref": "optional commit or diff reference",
       "test_ref": "optional test command or path"
+    }
+  ],
+  "contradicts_edges": [
+    {
+      "node_title": "Exact title of the newly extracted node from above",
+      "existing_node_id": "ID of the existing node it contradicts",
+      "reason": "Short explanation"
     }
   ]
 }
@@ -314,9 +345,34 @@ ${sessionEvents.map((e) => JSON.stringify(e)).join("\n")}
     // re-opened inside each check to avoid locking issues).
     for (const createdNode of insertedNodes) {
       try {
-        await checkContradictions(createdNode, projectRoot, apiKey);
+        await checkContradictions(createdNode, projectRoot);
       } catch (cErr: any) {
-        console.error(`[dev-mem] Contradiction check failed for "${createdNode.title}": ${cErr.message}`);
+        console.error(`[dev-mem] Contradiction heuristic check failed for "${createdNode.title}": ${cErr.message}`);
+      }
+    }
+
+    // Process LLM proposed contradictions from batched call
+    if (Array.isArray(parsed.contradicts_edges) && parsed.contradicts_edges.length > 0) {
+      try {
+        const edgeStore = new GraphStore({ projectRoot, ephemeral: mockLlm || process.env.DEV_MEM_MOCK_LLM === "1" });
+        for (const edge of parsed.contradicts_edges) {
+          const srcNode = insertedNodes.find(n => n.title === edge.node_title);
+          if (srcNode && edge.existing_node_id) {
+            try {
+              edgeStore.createEdge({
+                from_id: srcNode.id,
+                to_id: edge.existing_node_id,
+                type: "contradicts"
+              });
+              console.warn(`[dev-mem] LLM Contradiction detected: "${srcNode.title}" ↔ [ID: ${edge.existing_node_id}]`);
+            } catch (e) {
+               // ignore duplicate edges or bad IDs
+            }
+          }
+        }
+        edgeStore.close();
+      } catch (err) {
+        // Ignore
       }
     }
 

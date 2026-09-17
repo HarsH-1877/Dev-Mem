@@ -3,16 +3,15 @@
  *
  * Two narrow, scoped checks only — per spec's explicit scope limit:
  *
- * 1. `checkContradictions` — rule-based detection of semantic conflicts between
- *    a newly proposed node and existing active nodes touching the same files.
+ * 1. `checkContradictions` — rule-based heuristic detection of semantic conflicts
+ *    between a newly proposed node and existing active nodes touching the same files.
  *    When a conflict is found a `contradicts` edge is created in the graph.
  *    Rule: a new Decision/Constraint that shares files with an existing
  *    Decision/Constraint of the opposite polarity (or identical title tokens).
- *    We use an LLM-assisted check during extraction rather than pure heuristics
- *    because keyword matching is brittle for semantic contradictions (e.g.
- *    "use X" vs "don't use X" requires understanding negation). The LLM call is
- *    extremely cheap (single yes/no answer) and reuses the existing API key.
- *    Fallback: if no API key, use a simple title-overlap heuristic.
+ *    
+ *    Note: contradiction detection uses a heuristic here AND is also proposed by
+ *    the LLM during extraction (core/extraction/) — the extraction's single batched
+ *    LLM call is the ONLY LLM call site in the entire codebase per §4.1.
  *
  * 2. `checkStaleness` — walks all non-stale, non-superseded nodes and marks any
  *    whose cited files no longer exist on disk as `stale`.
@@ -23,8 +22,6 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { GraphStore } from "../graph/index.js";
 import type { KnowledgeNode } from "../graph/types.js";
-
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
 // Node types that can meaningfully contradict each other
 const CONTRADICTION_TYPES = new Set(["Decision", "Constraint", "Convention"]);
@@ -47,7 +44,6 @@ export interface ContradictionResult {
 export async function checkContradictions(
   newNode: KnowledgeNode,
   projectRoot: string,
-  apiKey?: string,
   dbPath?: string
 ): Promise<ContradictionResult> {
   const result: ContradictionResult = { edgesCreated: [], conflicts: [] };
@@ -75,9 +71,9 @@ export async function checkContradictions(
 
     if (candidates.length === 0) return result;
 
-    // Check each candidate for contradiction
+    // Check each candidate for contradiction using the heuristic
     for (const candidate of candidates) {
-      const contradicts = await detectContradiction(newNode, candidate, apiKey);
+      const contradicts = detectContradiction(newNode, candidate);
       if (contradicts) {
         try {
           const edge = store.createEdge({
@@ -107,62 +103,13 @@ export async function checkContradictions(
 }
 
 /**
- * Determines whether two nodes contradict each other.
- *
- * Strategy (in order of availability):
- * 1. LLM yes/no check (cheap single-token answer) — accurate for semantic negation
- * 2. Title-token heuristic fallback — catches obvious structural conflicts
+ * Determines whether two nodes contradict each other using a structural heuristic.
  */
-async function detectContradiction(
+function detectContradiction(
   nodeA: KnowledgeNode,
-  nodeB: KnowledgeNode,
-  apiKey?: string
-): Promise<boolean> {
-  const key = apiKey || process.env.ANTHROPIC_API_KEY;
-
-  if (key) {
-    return detectContradictionViaLlm(nodeA, nodeB, key);
-  }
-
-  // Fallback: structural heuristic
+  nodeB: KnowledgeNode
+): boolean {
   return detectContradictionHeuristic(nodeA, nodeB);
-}
-
-async function detectContradictionViaLlm(
-  nodeA: KnowledgeNode,
-  nodeB: KnowledgeNode,
-  apiKey: string
-): Promise<boolean> {
-  try {
-    const prompt =
-      `Do these two development knowledge statements directly contradict each other? ` +
-      `Answer with only "YES" or "NO".\n\n` +
-      `Statement A: ${nodeA.title}\n` +
-      `Statement B: ${nodeB.title}`;
-
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 5,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-
-    if (!response.ok) return false;
-
-    const data = (await response.json()) as any;
-    const text: string = data?.content?.[0]?.text?.trim().toUpperCase() ?? "";
-    return text.startsWith("YES");
-  } catch {
-    // If LLM call fails, fall back to heuristic silently
-    return detectContradictionHeuristic(nodeA, nodeB);
-  }
 }
 
 /**

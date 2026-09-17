@@ -295,7 +295,9 @@ Every version must be benchmarked, not just demoed. Required metrics:
 4. **Task success rate** — with vs. without Dev-Mem, on tasks that depend on prior context
 5. **Time-to-completion** — wall-clock, with vs. without
 
-**Test harness**: a fixed sample repo with a sequence of ~10-15 tasks where later tasks genuinely depend on knowledge from earlier ones (e.g. task 2 requires knowing a decision made in task 1). Run each sequence with Dev-Mem OFF and ON, across at least two different agents, and publish the comparison table.
+**Test harness**: a fixed sample repo with a sequence of ~10-15 tasks where later tasks genuinely depend on knowledge from earlier ones (e.g. task 2 requires knowing a decision made in task 1). Run each sequence with Dev-Mem OFF and ON, and publish the comparison table.
+
+**V1 scope**: V1 evaluation validates **single-agent performance only** (Claude Code sessions across time). Multi-agent comparison (measuring knowledge transfer across at least two different agents) is explicitly a **V2 requirement** — it cannot be tested until Codex/Cursor adapters exist (§12, §13).
 
 ## 12. Cross-Agent Adapter Layer
 

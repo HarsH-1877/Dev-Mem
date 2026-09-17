@@ -13,6 +13,6 @@
     "erasableSyntaxOnly": true,
     "types": ["node"]
   },
-  "include": ["cli/**/*.ts", "core/**/*.ts", "adapters/**/*.ts"],
+  "include": ["cli/**/*.ts", "core/**/*.ts", "adapters/**/*.ts", "eval/**/*.ts"],
   "exclude": ["dist", "node_modules", "**/*.test.ts"]
 }

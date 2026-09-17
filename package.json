@@ -26,7 +26,8 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval": "npm run build && node dist/eval/run-eval.js"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

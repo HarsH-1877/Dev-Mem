@@ -122,7 +122,7 @@ describe("checkContradictions (heuristic, no API key)", () => {
     store2.close();
 
     // No API key → heuristic path
-    const result = await checkContradictions(newNode, tmpDir, undefined, dbPath);
+    const result = await checkContradictions(newNode, tmpDir, dbPath);
 
     expect(result.edgesCreated.length).toBeGreaterThan(0);
     expect(result.conflicts[0]).toContain("contradicts");

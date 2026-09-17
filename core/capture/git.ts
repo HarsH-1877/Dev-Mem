@@ -47,7 +47,7 @@ export function collectGitSnapshot(
   const worktree = runGit(repoPath, ["rev-parse", "--show-toplevel"]);
   const branch = tryGit(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
   const head_commit = tryGit(repoPath, ["rev-parse", "HEAD"]);
-  const statusRaw = tryGit(repoPath, ["status", "--porcelain"]) ?? "";
+  const statusRaw = tryGit(repoPath, ["status", "--porcelain", "-u"]) ?? "";
   const diff = tryGit(repoPath, ["diff"]) ?? "";
   const staged_diff = tryGit(repoPath, ["diff", "--cached"]) ?? "";
   const worktrees = parseWorktrees(

@@ -13,8 +13,6 @@ function parseInput(): ClaudeCodeHookInput | null {
   }
 }
 
-import { runExtraction } from "../../core/extraction/index.js";
-
 async function main() {
   const payload = parseInput();
   if (!payload) {
@@ -31,10 +29,39 @@ async function main() {
 
   try {
     switch (payload.hook_event_name) {
-      case "SessionStart":
+      case "SessionStart": {
         capture.startSession();
-        capture.captureGit();
+        const gitSnap = capture.captureGit();
+
+        const { retrieveContext, generateInjectionString } = await import("../../core/retrieval/index.js");
+        const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
+
+        // Files currently modified/staged in working tree (if any)
+        const currentFiles = Array.isArray(gitSnap.status) ? gitSnap.status.map((s) => s.path) : [];
+
+        const regressionMatches = checkRegressionRisk({
+          projectRoot,
+          currentFiles,
+          confidenceThreshold: 0.6,
+        });
+        const regressionWarning = formatRegressionWarning(regressionMatches);
+
+        // Normal ranked retrieval with graph proximity signal
+        const nodes = retrieveContext({ projectRoot, budgetTokens: 2000, currentFiles });
+        const contextBlock = generateInjectionString(nodes);
+
+        // Regression warning appears first — it is the most actionable signal
+        const additionalContext = [regressionWarning, contextBlock]
+          .filter(Boolean)
+          .join("\n\n");
+
+        if (additionalContext) {
+          console.log(JSON.stringify({
+            hookSpecificOutput: { additionalContext }
+          }));
+        }
         break;
+      }
 
       case "PostToolUse": {
         const toolName = payload.tool_name;
@@ -46,6 +73,7 @@ async function main() {
         let exitCode = 0;
         let stdout: string | undefined;
         let stderr: string | undefined;
+        let touchedFile: string | undefined;
 
         if (toolName === "Bash" || toolName === "PowerShell") {
           command = toolInput.command || toolName;
@@ -54,6 +82,7 @@ async function main() {
         } else if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
           command = toolName;
           args = [toolInput.file_path];
+          touchedFile = toolInput.file_path;
         } else {
           command = toolName;
           args = [JSON.stringify(toolInput)];
@@ -66,6 +95,24 @@ async function main() {
           stdout,
           stderr,
         });
+
+        // §8.1 Mid-session regression check: fires when agent writes/edits a
+        // file, which is the precise moment we know the exact file being changed.
+        // PostToolUse gives us the file name; SessionStart does not.
+        if (touchedFile && (toolName === "Write" || toolName === "Edit")) {
+          const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
+          const matches = checkRegressionRisk({
+            projectRoot,
+            currentFiles: [touchedFile],
+            confidenceThreshold: 0.6,
+          });
+          const warning = formatRegressionWarning(matches);
+          if (warning) {
+            console.log(JSON.stringify({
+              hookSpecificOutput: { additionalContext: warning }
+            }));
+          }
+        }
         break;
       }
 
@@ -73,14 +120,23 @@ async function main() {
         capture.captureGit();
         break;
 
-      case "SessionEnd":
+      case "SessionEnd": {
         capture.endSession();
-        await runExtraction({
-          projectRoot,
-          sessionId: payload.session_id,
-          mockLlm: process.env.DEV_MEM_MOCK_LLM === "1"
+        // Detached spawn to avoid the 1.5s hook timeout (M4 fix)
+        const cp = await import("node:child_process");
+        const path = await import("node:path");
+        const url = await import("node:url");
+        const currentDir = path.dirname(url.fileURLToPath(import.meta.url));
+        const cliPath = path.join(currentDir, "../../cli/index.js");
+
+        const child = cp.spawn("node", [cliPath, "extract", payload.session_id], {
+          cwd: projectRoot,
+          detached: true,
+          stdio: "ignore"
         });
+        child.unref();
         break;
+      }
 
       default:
         break;

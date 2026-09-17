@@ -6,6 +6,7 @@ const COMMANDS = [
   "query",
   "inspect",
   "uninstall",
+  "extract",
 ] as const;
 
 type Command = (typeof COMMANDS)[number];
@@ -28,18 +29,30 @@ function getHookScriptCode(eventName: string): string {
 import { pathToFileURL } from "node:url";
 
 let captureModule;
-let extractionModule;
+let retrievalModule;
+let regressionModule;
 
 try {
   captureModule = await import("dev-mem/capture");
-  extractionModule = await import("dev-mem/extraction");
 } catch {
   captureModule = await import(pathToFileURL("${distDir}/core/capture/index.js").href);
-  extractionModule = await import(pathToFileURL("${distDir}/core/extraction/index.js").href);
+}
+
+try {
+  retrievalModule = await import("dev-mem/retrieval");
+} catch {
+  retrievalModule = await import(pathToFileURL("${distDir}/core/retrieval/index.js").href);
+}
+
+try {
+  regressionModule = await import("dev-mem/regression");
+} catch {
+  regressionModule = await import(pathToFileURL("${distDir}/core/regression/index.js").href);
 }
 
 const { DeterministicCapture } = captureModule;
-const { runExtraction } = extractionModule;
+const { retrieveContext, generateInjectionString } = retrievalModule;
+const { checkRegressionRisk, formatRegressionWarning } = regressionModule;
 
 const inputStr = readFileSync(0, "utf-8");
 if (!inputStr) process.exit(0);
@@ -56,22 +69,49 @@ async function main() {
   try {
     if ("${eventName}" === "SessionStart") {
       capture.startSession();
-      capture.captureGit();
+      const gitSnap = capture.captureGit();
+
+      // Files currently modified/staged in working tree (if any)
+      const currentFiles = Array.isArray(gitSnap.status) ? gitSnap.status.map((s) => s.path) : [];
+
+      // §8.1 Regression Intelligence at session start
+      const regressionMatches = checkRegressionRisk({
+        projectRoot: cwd,
+        currentFiles,
+        confidenceThreshold: 0.6,
+      });
+      const regressionWarning = formatRegressionWarning(regressionMatches);
+
+      // §8 Budget-constrained ranked retrieval with graph proximity
+      const nodes = retrieveContext({ projectRoot: cwd, budgetTokens: 2000, currentFiles });
+      const contextBlock = generateInjectionString(nodes);
+
+      const additionalContext = [regressionWarning, contextBlock]
+        .filter(Boolean)
+        .join("\\n\\n");
+
+      if (additionalContext) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { additionalContext }
+        }));
+      }
     } else if ("${eventName}" === "PostToolUse") {
       const toolName = payload.tool_name;
       const toolInput = payload.tool_input || {};
       const toolResponse = payload.tool_response || {};
-      
+
       let command = toolName;
       let args = [];
       let stdout, stderr;
-      
+      let touchedFile;
+
       if (toolName === "Bash" || toolName === "PowerShell") {
         command = toolInput.command || toolName;
         stdout = toolResponse.stdout;
         stderr = toolResponse.stderr;
       } else if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
         args = [toolInput.file_path];
+        touchedFile = toolInput.file_path;
       } else {
         args = [JSON.stringify(toolInput)];
       }
@@ -83,17 +123,34 @@ async function main() {
         stdout,
         stderr,
       });
+
+      // §8.1 Mid-session regression: check the exact file being written/edited
+      if (touchedFile && (toolName === "Write" || toolName === "Edit")) {
+        const matches = checkRegressionRisk({
+          projectRoot: cwd,
+          currentFiles: [touchedFile],
+          confidenceThreshold: 0.6,
+        });
+        const warning = formatRegressionWarning(matches);
+        if (warning) {
+          console.log(JSON.stringify({
+            hookSpecificOutput: { additionalContext: warning }
+          }));
+        }
+      }
     } else if ("${eventName}" === "Stop") {
       capture.captureGit();
     } else if ("${eventName}" === "SessionEnd") {
       capture.endSession();
-      // Milestone 3: Run extraction at session end
-      // Failures in extraction are caught inside runExtraction and won't crash the hook
-      await runExtraction({
-        projectRoot: cwd,
-        sessionId: payload.session_id,
-        mockLlm: process.env.DEV_MEM_MOCK_LLM === "1"
+      const { spawn } = await import("node:child_process");
+      const { join } = await import("node:path");
+
+      const child = spawn("node", [join("${distDir}", "cli/index.js"), "extract", payload.session_id], {
+        cwd,
+        detached: true,
+        stdio: "ignore"
       });
+      child.unref();
     }
   } catch (err) {
     console.error("[Dev-Mem] Hook error:", err);
@@ -108,7 +165,7 @@ main();
 function installHooks(cwd: string) {
   const claudeDir = join(cwd, ".claude");
   if (!existsSync(claudeDir)) {
-    throw new Error("No .claude directory found. Run claude code first.");
+    mkdirSync(claudeDir, { recursive: true });
   }
   
   const hooksDir = join(claudeDir, "hooks");
@@ -236,7 +293,9 @@ function runStatus(cwd: string): string {
   return output;
 }
 
-export function runCli(argv: string[]): { exitCode: number; stdout: string; stderr: string } {
+import { runExtraction } from "../core/extraction/index.js";
+
+export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const [command, ...args] = argv;
 
   if (!command) {
@@ -260,38 +319,49 @@ export function runCli(argv: string[]): { exitCode: number; stdout: string; stde
   try {
     if (command === "install") {
       installHooks(cwd);
-      return { exitCode: 0, stdout: "dev-mem hooks installed\n", stderr: "" };
+      return { exitCode: 0, stdout: "dev-mem hooks installed\\n", stderr: "" };
     } else if (command === "status") {
       const output = runStatus(cwd);
-      return { exitCode: 0, stdout: output + "\n", stderr: "" };
+      return { exitCode: 0, stdout: output + "\\n", stderr: "" };
     } else if (command === "uninstall") {
       const purge = args.includes("--purge");
       uninstallHooks(cwd, purge);
-      return { exitCode: 0, stdout: "dev-mem hooks uninstalled\n", stderr: "" };
+      return { exitCode: 0, stdout: "dev-mem hooks uninstalled\\n", stderr: "" };
+    } else if (command === "extract") {
+      const sessionId = args[0];
+      if (!sessionId) {
+        return { exitCode: 1, stdout: "", stderr: "Usage: dev-mem extract <sessionId>\\n" };
+      }
+      await runExtraction({ projectRoot: cwd, sessionId });
+      return { exitCode: 0, stdout: "Extraction complete\\n", stderr: "" };
     }
   } catch (e: any) {
-    return { exitCode: 1, stdout: "", stderr: e.message + "\n" };
+    return { exitCode: 1, stdout: "", stderr: e.message + "\\n" };
   }
 
   // Full command logic is a later milestone. Surface exists now (spec §3.4).
-  return { exitCode: 0, stdout: "not yet implemented\n", stderr: "" };
+  return { exitCode: 0, stdout: "not yet implemented\\n", stderr: "" };
 }
 
 const isDirectRun =
   process.argv[1] !== undefined &&
   (process.argv[1].endsWith("cli/index.ts") ||
-    process.argv[1].endsWith("cli\\index.ts") ||
+    process.argv[1].endsWith("cli\\\\index.ts") ||
     process.argv[1].endsWith("cli/index.js") ||
-    process.argv[1].endsWith("cli\\index.js") ||
+    process.argv[1].endsWith("cli\\\\index.js") ||
     process.argv[1].endsWith("dev-mem"));
 
 if (isDirectRun) {
-  const result = runCli(process.argv.slice(2));
-  if (result.stdout) {
-    process.stdout.write(result.stdout);
-  }
-  if (result.stderr) {
-    process.stderr.write(result.stderr);
-  }
-  process.exit(result.exitCode);
+  runCli(process.argv.slice(2)).then((result) => {
+    if (result.stdout) {
+      process.stdout.write(result.stdout);
+    }
+    if (result.stderr) {
+      process.stderr.write(result.stderr);
+    }
+    process.exit(result.exitCode);
+  }).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }

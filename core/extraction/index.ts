@@ -4,6 +4,7 @@ import { GraphStore } from "../graph/index.js";
 import type { CaptureEvent, FileTouchEvent, GitSnapshotEvent, ToolCallEvent } from "../capture/events.js";
 import type { CreateNodeInput, KnowledgeNode, NodeType } from "../graph/types.js";
 import { NODE_TYPES } from "../graph/types.js";
+import { checkContradictions, checkStaleness } from "../consistency/index.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -308,6 +309,25 @@ ${sessionEvents.map((e) => JSON.stringify(e)).join("\n")}
     }
 
     store.close();
+
+    // §8.2 Consistency checks run after all nodes are inserted (store closed and
+    // re-opened inside each check to avoid locking issues).
+    for (const createdNode of insertedNodes) {
+      try {
+        await checkContradictions(createdNode, projectRoot, apiKey);
+      } catch (cErr: any) {
+        console.error(`[dev-mem] Contradiction check failed for "${createdNode.title}": ${cErr.message}`);
+      }
+    }
+
+    // Staleness: run once per extraction on existing graph state, excluding nodes just inserted
+    try {
+      const insertedIds = insertedNodes.map((n) => n.id);
+      checkStaleness(projectRoot, undefined, insertedIds);
+    } catch (sErr: any) {
+      console.error(`[dev-mem] Staleness check failed: ${sErr.message}`);
+    }
+
     return { success: true, nodes: insertedNodes };
   } catch (unexpectedErr: any) {
     // Top-level error safety: extraction must never crash the caller (SessionEnd hook)

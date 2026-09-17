@@ -12,7 +12,10 @@
     "./graph": "./dist/core/graph/index.js",
     "./capture": "./dist/core/capture/index.js",
     "./lifecycle": "./dist/core/lifecycle/index.js",
-    "./extraction": "./dist/core/extraction/index.js"
+    "./extraction": "./dist/core/extraction/index.js",
+    "./retrieval": "./dist/core/retrieval/index.js",
+    "./regression": "./dist/core/regression/index.js",
+    "./consistency": "./dist/core/consistency/index.js"
   },
   "files": [
     "dist"

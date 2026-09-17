@@ -219,6 +219,13 @@ export class GraphStore {
     return rows.map((row) => this.rowToNode(row));
   }
 
+  queryAllNodes(): KnowledgeNode[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM nodes ORDER BY created_at ASC`)
+      .all() as unknown as NodeRow[];
+    return rows.map((row) => this.rowToNode(row));
+  }
+
   transitionLifecycleState(
     nodeId: string,
     toState: LifecycleState,

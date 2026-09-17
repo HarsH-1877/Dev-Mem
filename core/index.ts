@@ -21,3 +21,8 @@ export {
   getGraphDbPath,
   getEventsLogPath,
 } from "./local-data.js";
+export {
+  runExtraction,
+  type ExtractionOptions,
+  type ExtractionResult,
+} from "./extraction/index.js";

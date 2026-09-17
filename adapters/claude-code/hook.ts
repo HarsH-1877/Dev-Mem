@@ -13,7 +13,9 @@ function parseInput(): ClaudeCodeHookInput | null {
   }
 }
 
-function main() {
+import { runExtraction } from "../../core/extraction/index.js";
+
+async function main() {
   const payload = parseInput();
   if (!payload) {
     process.exit(0);
@@ -27,55 +29,64 @@ function main() {
     sessionId: payload.session_id,
   });
 
-  switch (payload.hook_event_name) {
-    case "SessionStart":
-      capture.startSession();
-      capture.captureGit();
-      break;
+  try {
+    switch (payload.hook_event_name) {
+      case "SessionStart":
+        capture.startSession();
+        capture.captureGit();
+        break;
 
-    case "PostToolUse": {
-      const toolName = payload.tool_name;
-      const toolInput = payload.tool_input || {};
-      const toolResponse = payload.tool_response || {};
+      case "PostToolUse": {
+        const toolName = payload.tool_name;
+        const toolInput = payload.tool_input || {};
+        const toolResponse = payload.tool_response || {};
 
-      let command = toolName;
-      let args: string[] = [];
-      let exitCode = 0;
-      let stdout: string | undefined;
-      let stderr: string | undefined;
+        let command = toolName;
+        let args: string[] = [];
+        let exitCode = 0;
+        let stdout: string | undefined;
+        let stderr: string | undefined;
 
-      if (toolName === "Bash" || toolName === "PowerShell") {
-        command = toolInput.command || toolName;
-        stdout = toolResponse.stdout;
-        stderr = toolResponse.stderr;
-      } else if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
-        command = toolName;
-        args = [toolInput.file_path];
-      } else {
-        command = toolName;
-        args = [JSON.stringify(toolInput)];
+        if (toolName === "Bash" || toolName === "PowerShell") {
+          command = toolInput.command || toolName;
+          stdout = toolResponse.stdout;
+          stderr = toolResponse.stderr;
+        } else if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
+          command = toolName;
+          args = [toolInput.file_path];
+        } else {
+          command = toolName;
+          args = [JSON.stringify(toolInput)];
+        }
+
+        capture.recordToolCall({
+          command,
+          args,
+          exit_code: exitCode,
+          stdout,
+          stderr,
+        });
+        break;
       }
 
-      capture.recordToolCall({
-        command,
-        args,
-        exit_code: exitCode,
-        stdout,
-        stderr,
-      });
-      break;
+      case "Stop":
+        capture.captureGit();
+        break;
+
+      case "SessionEnd":
+        capture.endSession();
+        await runExtraction({
+          projectRoot,
+          sessionId: payload.session_id,
+          mockLlm: process.env.DEV_MEM_MOCK_LLM === "1"
+        });
+        break;
+
+      default:
+        break;
     }
-
-    case "Stop":
-      capture.captureGit();
-      break;
-
-    case "SessionEnd":
-      capture.endSession();
-      break;
-
-    default:
-      break;
+  } catch (err) {
+    console.error("[Dev-Mem] Hook error:", err);
   }
 
   process.exit(0);

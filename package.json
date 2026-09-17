@@ -11,7 +11,8 @@
     ".": "./dist/core/index.js",
     "./graph": "./dist/core/graph/index.js",
     "./capture": "./dist/core/capture/index.js",
-    "./lifecycle": "./dist/core/lifecycle/index.js"
+    "./lifecycle": "./dist/core/lifecycle/index.js",
+    "./extraction": "./dist/core/extraction/index.js"
   },
   "files": [
     "dist"

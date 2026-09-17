@@ -14,15 +14,32 @@ function isCommand(value: string): value is Command {
   return (COMMANDS as readonly string[]).includes(value);
 }
 
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync } from "node:fs";
 import { ensureLocalDataDir, getEventsLogPath } from "../core/local-data.js";
 import { GraphStore } from "../core/graph/index.js";
 
 function getHookScriptCode(eventName: string): string {
-  // Using a dynamic import so that it works whether dev-mem is linked or installed
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  const distDir = join(currentDir, "..").replace(/\\/g, "/");
+
   return `import { readFileSync } from "node:fs";
-import { DeterministicCapture } from "dev-mem/capture";
+import { pathToFileURL } from "node:url";
+
+let captureModule;
+let extractionModule;
+
+try {
+  captureModule = await import("dev-mem/capture");
+  extractionModule = await import("dev-mem/extraction");
+} catch {
+  captureModule = await import(pathToFileURL("${distDir}/core/capture/index.js").href);
+  extractionModule = await import(pathToFileURL("${distDir}/core/extraction/index.js").href);
+}
+
+const { DeterministicCapture } = captureModule;
+const { runExtraction } = extractionModule;
 
 const inputStr = readFileSync(0, "utf-8");
 if (!inputStr) process.exit(0);
@@ -35,42 +52,56 @@ const capture = new DeterministicCapture({
   sessionId: payload.session_id,
 });
 
-if ("${eventName}" === "SessionStart") {
-  capture.startSession();
-  capture.captureGit();
-} else if ("${eventName}" === "PostToolUse") {
-  const toolName = payload.tool_name;
-  const toolInput = payload.tool_input || {};
-  const toolResponse = payload.tool_response || {};
-  
-  let command = toolName;
-  let args = [];
-  let stdout, stderr;
-  
-  if (toolName === "Bash" || toolName === "PowerShell") {
-    command = toolInput.command || toolName;
-    stdout = toolResponse.stdout;
-    stderr = toolResponse.stderr;
-  } else if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
-    args = [toolInput.file_path];
-  } else {
-    args = [JSON.stringify(toolInput)];
-  }
+async function main() {
+  try {
+    if ("${eventName}" === "SessionStart") {
+      capture.startSession();
+      capture.captureGit();
+    } else if ("${eventName}" === "PostToolUse") {
+      const toolName = payload.tool_name;
+      const toolInput = payload.tool_input || {};
+      const toolResponse = payload.tool_response || {};
+      
+      let command = toolName;
+      let args = [];
+      let stdout, stderr;
+      
+      if (toolName === "Bash" || toolName === "PowerShell") {
+        command = toolInput.command || toolName;
+        stdout = toolResponse.stdout;
+        stderr = toolResponse.stderr;
+      } else if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
+        args = [toolInput.file_path];
+      } else {
+        args = [JSON.stringify(toolInput)];
+      }
 
-  capture.recordToolCall({
-    command,
-    args,
-    exit_code: 0,
-    stdout,
-    stderr,
-  });
-} else if ("${eventName}" === "Stop") {
-  capture.captureGit();
-} else if ("${eventName}" === "SessionEnd") {
-  capture.endSession();
+      capture.recordToolCall({
+        command,
+        args,
+        exit_code: 0,
+        stdout,
+        stderr,
+      });
+    } else if ("${eventName}" === "Stop") {
+      capture.captureGit();
+    } else if ("${eventName}" === "SessionEnd") {
+      capture.endSession();
+      // Milestone 3: Run extraction at session end
+      // Failures in extraction are caught inside runExtraction and won't crash the hook
+      await runExtraction({
+        projectRoot: cwd,
+        sessionId: payload.session_id,
+        mockLlm: process.env.DEV_MEM_MOCK_LLM === "1"
+      });
+    }
+  } catch (err) {
+    console.error("[Dev-Mem] Hook error:", err);
+  }
+  process.exit(0);
 }
 
-process.exit(0);
+main();
 `;
 }
 

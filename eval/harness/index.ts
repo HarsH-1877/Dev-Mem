@@ -700,7 +700,8 @@ async function runEvaluation(mode: "OFF" | "ON"): Promise<RunResult> {
         const retrieved = retrieveContext({
           projectRoot: repoDir,
           budgetTokens: 2000,
-          currentFiles: task.files
+          currentFiles: task.files,
+          currentTask: task.taskPromptText,
         });
         injectionText = generateInjectionString(retrieved);
         injectionTokens = countTokens(injectionText);
@@ -708,7 +709,7 @@ async function runEvaluation(mode: "OFF" | "ON"): Promise<RunResult> {
         if (task.shouldTriggerRegression) {
           const warnings = checkRegressionRisk({
             projectRoot: repoDir,
-            currentFiles: task.files
+            currentFiles: task.files,
           });
           regressionWarningShown = warnings.length > 0;
         }

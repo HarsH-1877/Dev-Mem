@@ -39,6 +39,11 @@ async function main() {
         // Files currently modified/staged in working tree (if any)
         const currentFiles = Array.isArray(gitSnap.status) ? gitSnap.status.map((s) => s.path) : [];
 
+        // session_title is the closest available task-description signal from
+        // Claude Code's SessionStart payload — used to improve relevance scoring.
+        const sessionStartPayload = payload as import("./types.js").SessionStartInput;
+        const currentTask = sessionStartPayload.session_title ?? undefined;
+
         const regressionMatches = checkRegressionRisk({
           projectRoot,
           currentFiles,
@@ -46,8 +51,9 @@ async function main() {
         });
         const regressionWarning = formatRegressionWarning(regressionMatches);
 
-        // Normal ranked retrieval with graph proximity signal
-        const nodes = retrieveContext({ projectRoot, budgetTokens: 2000, currentFiles });
+        // Normal ranked retrieval — passes currentTask for relevance scoring
+        // when available, falls back to file-overlap when absent.
+        const nodes = retrieveContext({ projectRoot, budgetTokens: 2000, currentFiles, currentTask });
         const contextBlock = generateInjectionString(nodes);
 
         // Regression warning appears first — it is the most actionable signal

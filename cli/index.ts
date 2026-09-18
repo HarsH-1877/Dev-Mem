@@ -82,8 +82,9 @@ async function main() {
       });
       const regressionWarning = formatRegressionWarning(regressionMatches);
 
-      // §8 Budget-constrained ranked retrieval with graph proximity
-      const nodes = retrieveContext({ projectRoot: cwd, budgetTokens: 2000, currentFiles });
+      // §8 Budget-constrained ranked retrieval with graph proximity.
+      // Budget is omitted: retrieveContext uses an adaptive default.
+      const nodes = retrieveContext({ projectRoot: cwd, currentFiles });
       const contextBlock = generateInjectionString(nodes);
 
       const additionalContext = [regressionWarning, contextBlock]

@@ -173,10 +173,43 @@ const W_FRESHNESS  = 0.25;
 const W_CONFIDENCE = 0.20;
 const W_PROXIMITY  = 0.20;
 
+// ─── Adaptive budget default ──────────────────────────────────────────────────
+//
+// A flat ceiling (e.g. 2000 tokens) makes relevance filtering a no-op on small
+// graphs: if the entire graph costs less than the budget, every node is always
+// injected regardless of its relevance score.
+//
+// The adaptive formula keeps the budget proportional to graph size so that
+// roughly half the graph is always subject to filtering:
+//
+//   budget = clamp(nodeCount × TOKEN_BUDGET_PER_NODE, MIN_BUDGET, MAX_BUDGET)
+//
+//   TOKEN_BUDGET_PER_NODE = 18  (≈ half the ~35-token cost of one formatted node)
+//   MIN_BUDGET            = 80  (floor: always allow at least 2 nodes)
+//   MAX_BUDGET            = 2000 (ceiling: unchanged for large mature graphs)
+//
+// Examples:
+//   5 nodes  → 5×18 = 90 tok  (budget fits ~2–3 nodes; relevance picks the best)
+//   12 nodes → 12×18 = 216 tok (budget fits ~6 nodes; half the graph is filtered)
+//   50 nodes → 50×18 = 900 tok
+//   120 nodes → capped at 2000 tok
+//
+// Callers may still pass an explicit budgetTokens to override this for specific
+// use cases (e.g. the query CLI command uses a wider budget when the user asks
+// for a full dump).
+
+const TOKEN_BUDGET_PER_NODE = 18;
+const MIN_BUDGET = 80;
+const MAX_BUDGET = 2000;
+
+function adaptiveBudget(nodeCount: number): number {
+  return Math.max(MIN_BUDGET, Math.min(MAX_BUDGET, nodeCount * TOKEN_BUDGET_PER_NODE));
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
-  const { projectRoot, budgetTokens = 2000, currentTask, currentFiles } = context;
+  const { projectRoot, currentTask, currentFiles } = context;
   const store = new GraphStore({ projectRoot });
 
   let nodes: KnowledgeNode[] = [];
@@ -185,6 +218,10 @@ export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
   } finally {
     store.close();
   }
+
+  // Use caller-supplied budget if provided; otherwise derive it adaptively so
+  // that relevance filtering has real selection pressure at any graph size.
+  const budgetTokens = context.budgetTokens ?? adaptiveBudget(nodes.length);
 
   // Score every candidate node
   const scoredNodes: RetrievedNode[] = nodes.map(node => {
@@ -252,4 +289,4 @@ ${formatted}
 
 // ─── Exported internals for testing ──────────────────────────────────────────
 
-export { calculateRelevance, calculateFreshness, calculateGraphProximity, jaccard, tokenise };
+export { calculateRelevance, calculateFreshness, calculateGraphProximity, jaccard, tokenise, adaptiveBudget };

@@ -1,6 +1,6 @@
 # Dev-Mem — Project Specification
 
-**Status:** v1.0 — **initial / living document.** This is the starting reference to begin building, not a frozen contract. See §0 for how it is expected to change.
+**Status:** v1.3 — **V1 feature-complete (Claude Code).** V1 exit criterion met 2026-09-18; see `eval/results/eval-corrected-2026-09-17T21-50-26-822Z.md`. See §0 for change process.
 **Audience:** Coding agents and contributors building this project
 **Purpose:** This document is the source of truth for what Dev-Mem is, why it exists, what it must and must not do, and how it is built across versions. Any implementation decision that conflicts with this document should be flagged, not silently overridden.
 
@@ -335,6 +335,19 @@ Build order: **Claude Code hooks first** (SessionStart, PostToolUse, Stop, Sessi
 
 **V1 exit criterion**: eval harness shows a measurable reduction in redundant discovery and a net-positive token delta, single-agent, before proceeding to V2.
 
+**✅ V1 EXIT CRITERION MET — 2026-09-18**
+
+Results from `eval/results/eval-corrected-2026-09-17T21-50-26-822Z.md` (eval budget 150 tokens, 12-task sequence):
+
+- Redundant discoveries: 13 eliminated (100%)
+- Regression repeat rate: 8.3% → 0.0%
+- Net token delta: **+454 tokens** (OFF: 4,781 / ON: 4,327)
+- Task success rate: 100% both modes
+
+**Budget-calibration lesson learned:** A flat token ceiling (e.g. 2000) makes relevance filtering a no-op on small graphs — if the entire graph costs fewer tokens than the budget, every node is always injected and relevance scores have no effect. The fix is an adaptive default proportional to graph size (`nodeCount × 18`, clamped 80–2000), so roughly half the graph is always subject to selection pressure regardless of how large or small the graph is. This is now the default in `core/retrieval/index.ts`. Do not revert to a flat ceiling without re-running the eval.
+
+**V1 is feature-frozen for Claude Code.** No new Claude Code capabilities until V2 (Codex/Cursor adapters) is under way.
+
 ### V2 — Cross-Agent Handoff
 
 **Goal: does this work across different agents, not just across sessions of the same agent?**
@@ -368,7 +381,7 @@ Build order: **Claude Code hooks first** (SessionStart, PostToolUse, Stop, Sessi
 | Graph store           | SQLite (tables + recursive CTEs)                                          | Local file at `.dev-mem/graph.sqlite`; no server dependency — see §14a, this specific choice is a default pending comparison |
 | Capture hooks         | Native Claude Code hook system                                            | SessionStart/PostToolUse/Stop/SessionEnd; JSON over stdin/stdout, language-agnostic protocol                                 |
 | Extraction            | Single batched LLM call per checkpoint                                    | Structured output (JSON schema matching §5)                                                                                  |
-| Retrieval scoring     | Plain TypeScript; exact knapsack for small N, greedy fallback for large N | Not yet benchmarked — see §14a                                                                                               |
+| Retrieval scoring     | Plain TypeScript; exact knapsack for small N, greedy fallback for large N | Validated in V1 eval; adaptive budget default (nodeCount × 18, clamped 80–2000) — see §13 budget-calibration note           |
 | Testing               | Vitest (or Jest)                                                          | Unit tests required for graph store, capture, retrieval scoring; the Vitest-vs-Jest pick specifically is arbitrary           |
 | Adapters (V2)         | Thin per-agent modules implementing the interface in §12                  | No core-service changes required per adapter                                                                                 |
 | Symbol grounding (V3) | tree-sitter                                                               | One language first                                                                                                           |
@@ -386,7 +399,7 @@ Build order: **Claude Code hooks first** (SessionStart, PostToolUse, Stop, Sessi
 | npm CLI + core library + adapters packaging | **High**                                                 | Matches how multiple real competitor tools in this space distribute (Claude-Mem, Beads, agent-mem, difflore-cli)                                                                                                                          |
 | Local-first, no server                      | **High**                                                 | Direct product requirement (token/privacy framing), not a technical guess                                                                                                                                                                 |
 | SQLite + recursive CTEs for the graph store | **Medium-low — unvalidated**                             | Chosen for zero-dependency simplicity; not benchmarked against an embedded graph DB (e.g. Kùzu) for this specific access pattern (small local graphs, frequent relevance-ranked traversal). Should be validated before treating as final. |
-| Knapsack-based retrieval scoring            | **Medium — theoretically sound, practically unverified** | Correct formulation for the stated problem (maximize score under token budget), but not tested against real candidate-set sizes to confirm exact-knapsack performs acceptably vs. needing the greedy fallback by default                  |
+| Knapsack-based retrieval scoring            | **Medium-high — validated in V1 eval**                   | Greedy knapsack with relevance+freshness+confidence+proximity scoring confirmed net-positive at 12-node graph. Adaptive budget default prevents the no-op failure mode. See §13.                                                          |
 | Vitest over Jest                            | **Low — arbitrary**                                      | No real comparison done; either is fine, pick and move on                                                                                                                                                                                 |
 | Full repo structure (§15)                   | **Starting point only**                                  | Expected to change — see §0                                                                                                                                                                                                               |
 
@@ -433,4 +446,4 @@ dev-mem/
 
 ---
 
-*End of specification. This is v1.2, an initial/living document meant to evolve as the project is built — not a final blueprint. Any deviation from what's written here during implementation should be raised explicitly, not assumed; and this document itself should be updated when reality diverges from it.*
+*End of specification. This is v1.3, updated to reflect V1 feature-complete status (Claude Code, 2026-09-18). V1 exit criterion met; see §13. Ready for V2 (Codex/Cursor adapters).*

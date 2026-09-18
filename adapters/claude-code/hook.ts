@@ -53,7 +53,10 @@ async function main() {
 
         // Normal ranked retrieval — passes currentTask for relevance scoring
         // when available, falls back to file-overlap when absent.
-        const nodes = retrieveContext({ projectRoot, budgetTokens: 2000, currentFiles, currentTask });
+        // Budget is omitted intentionally: retrieveContext applies an adaptive
+        // default (nodeCount × 18, clamped 80–2000) that creates real selection
+        // pressure at any graph size without over-injecting on small graphs.
+        const nodes = retrieveContext({ projectRoot, currentFiles, currentTask });
         const contextBlock = generateInjectionString(nodes);
 
         // Regression warning appears first — it is the most actionable signal

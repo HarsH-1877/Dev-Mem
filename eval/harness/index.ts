@@ -37,26 +37,8 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { DeterministicCapture } from "../../core/capture/index.js";
 import { runExtraction } from "../../core/extraction/index.js";
-import { retrieveContext, generateInjectionString } from "../../core/retrieval/index.js";
+import { retrieveContext, generateInjectionString, adaptiveBudget } from "../../core/retrieval/index.js";
 import { checkRegressionRisk } from "../../core/regression/index.js";
-
-// ─── Eval-harness retrieval budget ──────────────────────────────────────────
-//
-// The product's shipped default (core/retrieval/index.ts) uses 2000 tokens —
-// a safe ceiling for a mature graph with many accumulated nodes.
-//
-// This harness uses 150 tokens instead, for one specific reason: the 12-task
-// sample sequence produces at most ~12 nodes × ~35 tokens each = ~420 tokens
-// total graph cost. With a 2000-token budget the budget never binds — every
-// node is always injected, so relevance scoring has no effect and injection
-// grows unbounded with graph size. A budget of ~150 tokens (≈4-5 nodes)
-// creates real selection pressure and forces the scoring to actually choose,
-// which is what we need to measure whether retrieval discipline can keep
-// injection cost bounded.
-//
-// 150 is NOT a recommended production value. It is correct for a 12-node
-// graph; a real project with dozens of nodes should use a larger budget.
-const EVAL_RETRIEVAL_BUDGET_TOKENS = 150;
 
 // ─── Token estimator ────────────────────────────────────────────────────────
 
@@ -717,7 +699,8 @@ async function runEvaluation(mode: "OFF" | "ON"): Promise<RunResult> {
 
         const retrieved = retrieveContext({
           projectRoot: repoDir,
-          budgetTokens: EVAL_RETRIEVAL_BUDGET_TOKENS,
+          // budgetTokens omitted: retrieveContext applies adaptiveBudget(nodeCount)
+          // — the exact same default a real user gets. This is what we're testing.
           currentFiles: task.files,
           currentTask: task.taskPromptText,
         });
@@ -898,11 +881,11 @@ function formatResults(off: RunResult, on: RunResult, metrics: ComparisonMetrics
   lines.push("Net token delta = OFF_total − ON_total (positive = Dev-Mem saves tokens).");
   lines.push("No post-hoc adjustments are made to either side after counting.");
   lines.push("");
-  lines.push(`**Eval retrieval budget: ${EVAL_RETRIEVAL_BUDGET_TOKENS} tokens** (≈4–5 nodes at ~35 tok/node).`);
-  lines.push("The product's shipped default is 2000 tokens, appropriate for a mature graph.");
-  lines.push("This harness uses a tighter budget to create real selection pressure at the");
-  lines.push("12-node sample size: with 2000 tokens the entire graph (~420 tok) always fits,");
-  lines.push("making relevance filtering a no-op. 150 tokens is NOT a production recommendation.");
+  lines.push(`**Eval retrieval budget: adaptive default (shipped \`adaptiveBudget(nodeCount)\`).**`);
+  lines.push("This run uses *no* override — `retrieveContext` is called without `budgetTokens`,");
+  lines.push("so it applies the exact same adaptive default a real user gets:");
+  lines.push("`clamp(nodeCount × 18, 80, 2000)` computed live from the graph at each session.");
+  lines.push("This is NOT a fixed placeholder — it is the actual shipped default under test.");
   lines.push("");
   lines.push("**Time-to-completion** values are wall-clock from this simulated harness run.");
   lines.push("They reflect git ops, SQLite writes, and extraction mock latency — NOT real");

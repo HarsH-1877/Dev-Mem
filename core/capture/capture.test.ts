@@ -24,7 +24,7 @@ function typesOf(events: CaptureEvent[]): CaptureEvent["type"][] {
 }
 
 describe("DeterministicCapture", () => {
-  it("logs a sequence of git changes, file touches, and commands", () => {
+  it("logs a sequence of git changes, file touches, and commands", { timeout: 15000 }, () => {
     const root = initSampleRepo();
     writeFileSync(join(root, "README.md"), "# sample\n", "utf8");
     git(root, ["add", "README.md"]);

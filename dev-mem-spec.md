@@ -337,12 +337,15 @@ Build order: **Claude Code hooks first** (SessionStart, PostToolUse, Stop, Sessi
 
 **✅ V1 EXIT CRITERION MET — 2026-09-18**
 
-Results from `eval/results/eval-corrected-2026-09-17T21-50-26-822Z.md` (eval budget 150 tokens, 12-task sequence):
+Results from `eval/results/eval-corrected-2026-09-18T08-28-55-235Z.md` (eval using real shipped `adaptiveBudget(nodeCount)` default, no override, 12-task sequence):
 
 - Redundant discoveries: 13 eliminated (100%)
 - Regression repeat rate: 8.3% → 0.0%
-- Net token delta: **+454 tokens** (OFF: 4,781 / ON: 4,327)
+- Net token delta: **+562 tokens** (OFF: 4,781 / ON: 4,219)
 - Task success rate: 100% both modes
+- Injection overhead: 1,501 tokens total, plateaus rather than growing unbounded (budget adapts to graph size at each session)
+
+This result was verified against the actual shipped adaptive default, not a placeholder value.
 
 **Budget-calibration lesson learned:** A flat token ceiling (e.g. 2000) makes relevance filtering a no-op on small graphs — if the entire graph costs fewer tokens than the budget, every node is always injected and relevance scores have no effect. The fix is an adaptive default proportional to graph size (`nodeCount × 18`, clamped 80–2000), so roughly half the graph is always subject to selection pressure regardless of how large or small the graph is. This is now the default in `core/retrieval/index.ts`. Do not revert to a flat ceiling without re-running the eval.
 

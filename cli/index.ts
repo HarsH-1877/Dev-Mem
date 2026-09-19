@@ -7,6 +7,7 @@ const COMMANDS = [
   "inspect",
   "uninstall",
   "extract",
+  "wrap",
 ] as const;
 
 type Command = (typeof COMMANDS)[number];
@@ -323,6 +324,202 @@ main();
 }
 
 
+function getCursorHookScriptCode(eventName: string): string {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  const distDir = join(currentDir, "..").replace(/\\/g, "/");
+
+  return `import { readFileSync, existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+
+let captureModule;
+let retrievalModule;
+let regressionModule;
+let logModule;
+
+try {
+  captureModule = await import("dev-mem/capture");
+} catch {
+  captureModule = await import(pathToFileURL("${distDir}/core/capture/index.js").href);
+}
+
+try {
+  retrievalModule = await import("dev-mem/retrieval");
+} catch {
+  retrievalModule = await import(pathToFileURL("${distDir}/core/retrieval/index.js").href);
+}
+
+try {
+  regressionModule = await import("dev-mem/regression");
+} catch {
+  regressionModule = await import(pathToFileURL("${distDir}/core/regression/index.js").href);
+}
+
+try {
+  logModule = await import(pathToFileURL("${distDir}/core/capture/log.js").href);
+} catch {
+  // fallback if needed
+}
+
+const { DeterministicCapture } = captureModule;
+const { retrieveContext, generateInjectionString } = retrievalModule;
+const { checkRegressionRisk, formatRegressionWarning } = regressionModule;
+const { EventLog } = logModule;
+
+const inputStr = readFileSync(0, "utf-8");
+if (!inputStr) process.exit(0);
+const payload = JSON.parse(inputStr);
+const cwd = payload.cwd || process.cwd();
+
+const capture = new DeterministicCapture({
+  projectRoot: cwd,
+  agent: "cursor",
+  sessionId: payload.session_id,
+});
+
+function getExtractionThreshold(projectRoot) {
+  const configPath = join(projectRoot, ".dev-mem", "config.yml");
+  if (existsSync(configPath)) {
+    try {
+      const content = readFileSync(configPath, "utf-8");
+      const match = content.match(/extraction_event_threshold:\\s*(\\d+)/);
+      if (match && match[1]) {
+        return parseInt(match[1], 10);
+      }
+    } catch {
+      // fallback to default
+    }
+  }
+  return 10;
+}
+
+async function triggerExtractionIfThresholdMet(projectRoot, sessionId) {
+  try {
+    const log = new EventLog({ persistPath: join(projectRoot, ".dev-mem", "events.jsonl") });
+    const events = log.getEvents().filter(e => e.session_id === sessionId && e.type === "tool_call" && e.exit_code !== -1);
+    const threshold = getExtractionThreshold(projectRoot);
+
+    if (events.length > 0 && events.length % threshold === 0) {
+      const cp = await import("node:child_process");
+      const path = await import("node:path");
+      
+      const child = cp.spawn("node", [join("${distDir}", "cli/index.js"), "extract", sessionId], {
+        cwd: projectRoot,
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+    }
+  } catch (err) {
+    // Fail gracefully
+  }
+}
+
+async function main() {
+  try {
+    if ("${eventName}" === "sessionStart") {
+      capture.startSession();
+      const gitSnap = capture.captureGit();
+
+      const currentFiles = Array.isArray(gitSnap.status) ? gitSnap.status.map((s) => s.path) : [];
+
+      const regressionMatches = checkRegressionRisk({
+        projectRoot: cwd,
+        currentFiles,
+        confidenceThreshold: 0.6,
+      });
+      const regressionWarning = formatRegressionWarning(regressionMatches);
+
+      const nodes = retrieveContext({ projectRoot: cwd, currentFiles });
+      const contextBlock = generateInjectionString(nodes);
+
+      const additionalContext = [regressionWarning, contextBlock]
+        .filter(Boolean)
+        .join("\\\\n\\\\n");
+
+      if (additionalContext) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: { additionalContext }
+        }));
+      }
+    } else if ("${eventName}" === "preToolUse") {
+      const toolName = payload.tool_name;
+      const toolInput = payload.tool_input || {};
+      let command = toolName;
+      let args = [];
+      let touchedFile;
+
+      if (toolName === "Bash" || toolName === "Terminal") {
+        command = toolInput.command || toolName;
+      } else if (toolName === "Write" || toolName === "Edit" || toolName === "str_replace_editor") {
+        args = [toolInput.file_path ?? toolInput.path ?? ""];
+        touchedFile = toolInput.file_path ?? toolInput.path;
+      } else {
+        args = [JSON.stringify(toolInput)];
+      }
+
+      capture.recordToolCall({ command, args, exit_code: -1 });
+
+      if (touchedFile && (toolName === "Write" || toolName === "Edit" || toolName === "str_replace_editor")) {
+        const matches = checkRegressionRisk({
+          projectRoot: cwd,
+          currentFiles: [touchedFile],
+          confidenceThreshold: 0.6,
+        });
+        const warning = formatRegressionWarning(matches);
+        if (warning) {
+          console.log(JSON.stringify({ hookSpecificOutput: { additionalContext: warning } }));
+        }
+      }
+    } else if ("${eventName}" === "postToolUse") {
+      const toolName = payload.tool_name;
+      const toolInput = payload.tool_input || {};
+      const toolResponse = payload.tool_response || {};
+
+      let command = toolName;
+      let args = [];
+      let stdout, stderr;
+      let exitCode = toolResponse.exit_code ?? 0;
+      let touchedFile;
+
+      if (toolName === "Bash" || toolName === "Terminal") {
+        command = toolInput.command || toolName;
+        stdout = toolResponse.output ?? toolResponse.stdout;
+        stderr = toolResponse.stderr;
+      } else if (toolName === "Write" || toolName === "Edit" || toolName === "str_replace_editor") {
+        args = [toolInput.file_path ?? toolInput.path ?? ""];
+        touchedFile = toolInput.file_path ?? toolInput.path;
+      } else {
+        args = [JSON.stringify(toolInput)];
+      }
+
+      capture.recordToolCall({ command, args, exit_code: exitCode, stdout, stderr });
+
+      if (touchedFile && (toolName === "Write" || toolName === "Edit" || toolName === "str_replace_editor")) {
+        const matches = checkRegressionRisk({
+          projectRoot: cwd,
+          currentFiles: [touchedFile],
+          confidenceThreshold: 0.6,
+        });
+        const warning = formatRegressionWarning(matches);
+        if (warning) {
+          console.log(JSON.stringify({ hookSpecificOutput: { additionalContext: warning } }));
+        }
+      }
+    } else if ("${eventName}" === "stop") {
+      capture.captureGit();
+      await triggerExtractionIfThresholdMet(cwd, payload.session_id);
+    }
+  } catch (err) {
+    console.error("[Dev-Mem/Cursor] Hook error:", err);
+  }
+  process.exit(0);
+}
+
+main();
+`;
+}
+
 function installClaudeCodeHooks(cwd: string) {
   const claudeDir = join(cwd, ".claude");
   if (!existsSync(claudeDir)) {
@@ -436,16 +633,65 @@ function installCodexHooks(cwd: string) {
   writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2), "utf8");
 }
 
+function installCursorHooks(cwd: string) {
+  const cursorDir = join(cwd, ".cursor");
+  if (!existsSync(cursorDir)) {
+    mkdirSync(cursorDir, { recursive: true });
+  }
+
+  const hooksDir = join(cursorDir, "hooks");
+  if (!existsSync(hooksDir)) {
+    mkdirSync(hooksDir, { recursive: true });
+  }
+
+  // Cursor uses camelCase event names. sessionEnd is omitted (unreliable).
+  const events = ["sessionStart", "preToolUse", "postToolUse", "stop"];
+
+  for (const event of events) {
+    const scriptName = `dev-mem-${event.toLowerCase()}.js`;
+    const scriptPath = join(hooksDir, scriptName);
+    writeFileSync(scriptPath, getCursorHookScriptCode(event), "utf8");
+  }
+
+  const hooksJsonPath = join(cursorDir, "hooks.json");
+  let hooksJson: any = { version: 1, hooks: {} };
+  if (existsSync(hooksJsonPath)) {
+    try {
+      hooksJson = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
+      if (!hooksJson.hooks) hooksJson.hooks = {};
+    } catch {}
+  }
+
+  for (const event of events) {
+    const scriptName = `dev-mem-${event.toLowerCase()}.js`;
+    if (!hooksJson.hooks[event]) hooksJson.hooks[event] = [];
+
+    const existing = hooksJson.hooks[event].find((h: any) => {
+      const cmd: string = h.command ?? "";
+      return cmd && cmd.includes("dev-mem");
+    });
+
+    if (!existing) {
+      hooksJson.hooks[event].push({
+        command: `node .cursor/hooks/${scriptName}`,
+        matcher: "*",
+        timeout: 3
+      });
+    }
+  }
+
+  writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2), "utf8");
+}
+
 function installHooks(cwd: string) {
   const claudePresent = existsSync(join(cwd, ".claude"));
   const codexPresent = existsSync(join(cwd, ".codex"));
+  const cursorPresent = existsSync(join(cwd, ".cursor"));
 
-  // Always install Claude Code hooks if .claude/ exists (or as default).
-  // Install Codex hooks if .codex/ is already present (explicit Codex repo).
-  // Both can coexist in the same repo — neither blocks the other.
   const installedAgents: string[] = [];
 
-  if (claudePresent || !codexPresent) {
+  // Default to claude-code if none found, else install for present agents.
+  if (claudePresent || (!codexPresent && !cursorPresent)) {
     installClaudeCodeHooks(cwd);
     installedAgents.push("claude-code");
   }
@@ -453,6 +699,11 @@ function installHooks(cwd: string) {
   if (codexPresent) {
     installCodexHooks(cwd);
     installedAgents.push("codex");
+  }
+
+  if (cursorPresent) {
+    installCursorHooks(cwd);
+    installedAgents.push("cursor");
   }
 
   ensureLocalDataDir(cwd);
@@ -492,6 +743,39 @@ function uninstallCodexHooks(cwd: string) {
   }
 }
 
+function uninstallCursorHooks(cwd: string) {
+  const cursorDir = join(cwd, ".cursor");
+  const hooksJsonPath = join(cursorDir, "hooks.json");
+
+  if (existsSync(hooksJsonPath)) {
+    try {
+      const hooksJson = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
+      if (hooksJson.hooks) {
+        for (const event of Object.keys(hooksJson.hooks)) {
+          hooksJson.hooks[event] = hooksJson.hooks[event].filter((h: any) => {
+            const cmd: string = h.command ?? "";
+            return !cmd.includes("dev-mem");
+          });
+          if (hooksJson.hooks[event].length === 0) {
+            delete hooksJson.hooks[event];
+          }
+        }
+      }
+      writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2), "utf8");
+    } catch {}
+  }
+
+  const hooksDir = join(cursorDir, "hooks");
+  if (existsSync(hooksDir)) {
+    const events = ["sessionStart", "preToolUse", "postToolUse", "stop"];
+    for (const event of events) {
+      const scriptName = `dev-mem-${event.toLowerCase()}.js`;
+      const scriptPath = join(hooksDir, scriptName);
+      if (existsSync(scriptPath)) rmSync(scriptPath);
+    }
+  }
+}
+
 function uninstallHooks(cwd: string, purge: boolean) {
   // Claude Code
   const claudeDir = join(cwd, ".claude");
@@ -525,6 +809,11 @@ function uninstallHooks(cwd: string, purge: boolean) {
   // Codex
   if (existsSync(join(cwd, ".codex"))) {
     uninstallCodexHooks(cwd);
+  }
+
+  // Cursor
+  if (existsSync(join(cwd, ".cursor"))) {
+    uninstallCursorHooks(cwd);
   }
 
   if (purge) {
@@ -600,7 +889,11 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
   try {
     if (command === "install") {
       const agents = installHooks(cwd);
-      return { exitCode: 0, stdout: `dev-mem hooks installed (agents: ${agents.join(", ")})\n`, stderr: "" };
+      let out = `dev-mem hooks installed (agents: ${agents.join(", ")})\n`;
+      if (agents.includes("cursor")) {
+        out += `\n[Notice for Cursor]: Cursor CLI lacks a reliable SessionEnd event.\nDev-Mem uses an N-accumulated-events trigger (default 10) instead.\nFor a perfect flush when exiting, run your agent via: dev-mem wrap cursor-agent <args>\n`;
+      }
+      return { exitCode: 0, stdout: out, stderr: "" };
     } else if (command === "status") {
       const output = runStatus(cwd);
       return { exitCode: 0, stdout: output + "\n", stderr: "" };
@@ -615,6 +908,33 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
       }
       await runExtraction({ projectRoot: cwd, sessionId });
       return { exitCode: 0, stdout: "Extraction complete\n", stderr: "" };
+    } else if (command === "wrap") {
+      if (args.length === 0) {
+        return { exitCode: 1, stdout: "", stderr: "Usage: dev-mem wrap <command> [args...]\n" };
+      }
+      return new Promise((resolve) => {
+        import("node:child_process").then(({ spawn }) => {
+          const child = spawn(args[0], args.slice(1), { stdio: "inherit", shell: true });
+          
+          child.on("close", async (code) => {
+            try {
+              const { EventLog } = await import("../core/capture/log.js");
+              const log = new EventLog({ persistPath: join(cwd, ".dev-mem", "events.jsonl") });
+              const events = log.getEvents();
+              if (events.length > 0) {
+                const lastSessionId = events[events.length - 1].session_id;
+                if (lastSessionId) {
+                  process.stdout.write(`\n[dev-mem] Wrapping complete. Flushing remaining events for session ${lastSessionId}...\n`);
+                  await runExtraction({ projectRoot: cwd, sessionId: lastSessionId });
+                }
+              }
+            } catch (e: any) {
+              process.stderr.write(`[dev-mem] Wrap flush error: ${e.message}\n`);
+            }
+            resolve({ exitCode: code ?? 0, stdout: "", stderr: "" });
+          });
+        });
+      });
     }
   } catch (e: any) {
     return { exitCode: 1, stdout: "", stderr: e.message + "\n" };

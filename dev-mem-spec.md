@@ -200,7 +200,8 @@ Agent activity
 
 ### 7.2 Extraction layer (LLM, batched — not per-event)
 
-- Triggered at session end, or after N accumulated tool-calls/diffs (configurable via `.dev-mem/config.yml`)
+- Triggered at session end (Claude Code/Codex), or after N accumulated tool-calls (Cursor), configurable via `.dev-mem/config.yml`.
+- *Note on Cursor*: Cursor's CLI (`cursor-agent`) does not reliably fire a `SessionEnd` event when the headless process exits, and its hook schema uses a flat array with `camelCase` event names (unlike Claude Code/Codex's nested `PascalCase` schema). To compensate for the missing `SessionEnd`, the Cursor adapter relies on the N-accumulated-events checkpoint trigger evaluated at the end of each turn (`stop`).
 - Single batched LLM pass over the session's deterministic log → proposes typed nodes with evidence pointers
 - Extraction is the *only* place an LLM call is allowed in the capture path
 

@@ -2,4 +2,7 @@ node_modules/
 dist/
 .dev-mem/
 .claude/
+.codex/
+.cursor/
 e2e-repo/
+test-*/

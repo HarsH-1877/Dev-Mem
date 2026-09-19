@@ -11,8 +11,9 @@
  *   - Extra field: `model` on every event
  *   - Extra field: `turn_id` on turn-scoped events (PreToolUse, PostToolUse,
  *     UserPromptSubmit, Stop)
- *   - Events: PreToolUse available (Claude Code only has PostToolUse)
- *   - SessionEnd is present and can be run async (preferred over detached spawn)
+ *   - SessionEnd is present and uses detached-spawn for extraction to bypass
+ *     Codex's strict 1-3 second synchronous timeout (async flag has no effect
+ *     on SessionEnd).
  */
 
 export interface CodexBaseHookInput {

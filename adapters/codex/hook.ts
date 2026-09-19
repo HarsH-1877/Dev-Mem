@@ -8,12 +8,12 @@
  *
  * Differences from claude-code/hook.ts:
  *   - agent label is "codex" (written to evidence.agent)
- *   - SessionEnd can use async mode in hooks.json — no detached-spawn needed,
- *     but we keep detached spawn as the runtime fallback so this file is
- *     self-contained regardless of how the hook is registered.
- *   - PreToolUse events are forwarded to capture (Codex fires these; Claude
- *     Code does not). We record them as tool_call events with exit_code -1
- *     (pre-execution, outcome unknown) to build a richer session log.
+ *   - SessionEnd uses the detached-spawn pattern because Codex's SessionEnd
+ *     timeout is strictly 1-3 seconds synchronously (the async flag in
+ *     hooks.json is ignored for SessionEnd).
+ *   - PreToolUse events are forwarded to capture. We record them as tool_call
+ *     events with exit_code -1 (pre-execution, outcome unknown) to build a
+ *     richer session log.
  */
 import { readFileSync } from "node:fs";
 import { DeterministicCapture } from "../../core/capture/index.js";
@@ -193,7 +193,7 @@ async function main() {
 
       case "SessionEnd": {
         capture.endSession();
-        // Detached spawn keeps SessionEnd fast even if async flag isn't used.
+        // Detached spawn ensures extraction survives Codex's 1-3s synchronous timeout
         const cp = await import("node:child_process");
         const path = await import("node:path");
         const url = await import("node:url");

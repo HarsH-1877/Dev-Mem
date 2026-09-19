@@ -387,7 +387,7 @@ function installCodexHooks(cwd: string) {
     mkdirSync(hooksDir, { recursive: true });
   }
 
-  // Codex supports PreToolUse (Claude Code does not).
+  // Both Claude Code and Codex support PreToolUse.
   const events = ["SessionStart", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"];
 
   for (const event of events) {
@@ -416,12 +416,17 @@ function installCodexHooks(cwd: string) {
     });
 
     if (!existing) {
-      // SessionEnd runs async to avoid Codex's hook timeout
       const entry: any = {
         type: "command",
         command: `node .codex/hooks/${scriptName}`,
+        // Explicitly use SECONDS (Codex standard) to guarantee max window.
+        timeout: 3
       };
+      
       if (event === "SessionEnd") {
+        // We use detached spawn internally anyway, but we set async: true
+        // just to be compliant with best practices for non-blocking hooks.
+        // It has no effect on SessionEnd specifically (which is always sync).
         entry.async = true;
       }
       hooksJson.hooks[event].push(entry);

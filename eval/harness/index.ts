@@ -149,7 +149,7 @@ export interface ComparisonMetrics {
 //
 // Token counts are derived from these strings, not from flat numbers.
 
-const TASKS: TaskDefinition[] = [
+export const TASKS: TaskDefinition[] = [
   {
     id: 1,
     name: "Initial Architecture Decision",

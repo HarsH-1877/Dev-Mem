@@ -27,7 +27,8 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "eval": "npm run build && node dist/eval/run-eval.js"
+    "eval": "npm run build && node dist/eval/run-eval.js",
+    "eval:cross-agent": "npm run build && node dist/eval/harness/cross-agent.js"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

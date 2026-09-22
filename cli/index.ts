@@ -21,10 +21,17 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync } from "node:fs";
 import { ensureLocalDataDir, getEventsLogPath } from "../core/local-data.js";
 import { GraphStore } from "../core/graph/index.js";
+import { acquireExtractionLock, markExtractionComplete } from "../core/extraction-lock.js";
 
 function getHookScriptCode(eventName: string): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
   const distDir = join(currentDir, "..").replace(/\\/g, "/");
+
+  // Keep installed hooks on the same hardened implementation as the bundled
+  // adapter. The event-specific file is only the host registration surface.
+  return `import { pathToFileURL } from "node:url";
+await import(pathToFileURL("${distDir}/adapters/claude-code/hook.js").href);
+`;
 
   return `import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -167,6 +174,10 @@ main();
 function getCodexHookScriptCode(eventName: string): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
   const distDir = join(currentDir, "..").replace(/\\/g, "/");
+
+  return `import { pathToFileURL } from "node:url";
+await import(pathToFileURL("${distDir}/adapters/codex/hook.js").href);
+`;
 
   return `import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -327,6 +338,10 @@ main();
 function getCursorHookScriptCode(eventName: string): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
   const distDir = join(currentDir, "..").replace(/\\/g, "/");
+
+  return `import { pathToFileURL } from "node:url";
+await import(pathToFileURL("${distDir}/adapters/cursor/hook.js").href);
+`;
 
   return `import { readFileSync, existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -865,6 +880,27 @@ function runStatus(cwd: string): string {
 
 import { runExtraction } from "../core/extraction/index.js";
 
+async function extractOnce(cwd: string, sessionId: string): Promise<{ skipped: boolean; success: boolean }> {
+  let release: (() => void) | null;
+  try {
+    release = acquireExtractionLock(cwd, sessionId);
+  } catch (error) {
+    console.error(`[dev-mem] Unable to prepare extraction lock for ${sessionId}: ${(error as Error).message}`);
+    return { skipped: true, success: false };
+  }
+  if (!release) {
+    console.error(`[dev-mem] Extraction already running or complete for session ${sessionId}; skipping duplicate trigger`);
+    return { skipped: true, success: true };
+  }
+  try {
+    const result = await runExtraction({ projectRoot: cwd, sessionId });
+    if (result.success) markExtractionComplete(cwd, sessionId);
+    return { skipped: false, success: result.success };
+  } finally {
+    release();
+  }
+}
+
 export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const [command, ...args] = argv;
 
@@ -906,8 +942,8 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
       if (!sessionId) {
         return { exitCode: 1, stdout: "", stderr: "Usage: dev-mem extract <sessionId>\n" };
       }
-      await runExtraction({ projectRoot: cwd, sessionId });
-      return { exitCode: 0, stdout: "Extraction complete\n", stderr: "" };
+      const result = await extractOnce(cwd, sessionId);
+      return { exitCode: result.success ? 0 : 1, stdout: result.skipped ? "Extraction skipped\n" : "Extraction complete\n", stderr: "" };
     } else if (command === "wrap") {
       if (args.length === 0) {
         return { exitCode: 1, stdout: "", stderr: "Usage: dev-mem wrap <command> [args...]\n" };
@@ -925,7 +961,7 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
                 const lastSessionId = events[events.length - 1].session_id;
                 if (lastSessionId) {
                   process.stdout.write(`\n[dev-mem] Wrapping complete. Flushing remaining events for session ${lastSessionId}...\n`);
-                  await runExtraction({ projectRoot: cwd, sessionId: lastSessionId });
+                  await extractOnce(cwd, lastSessionId);
                 }
               }
             } catch (e: any) {

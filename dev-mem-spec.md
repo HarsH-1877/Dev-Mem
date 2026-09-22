@@ -1,6 +1,6 @@
 # Dev-Mem — Project Specification
 
-**Status:** v1.3 — **V1 feature-complete (Claude Code).** V1 exit criterion met 2026-09-18; see `eval/results/eval-corrected-2026-09-17T21-50-26-822Z.md`. See §0 for change process.
+**Status:** v1.4 — **V2 feature-complete (cross-agent handoff).** V1 exit criterion met 2026-09-18; V2 exit criterion met 2026-09-21; see `eval/results/eval-cross-agent-2026-09-21T16-44-00-031Z.md`. See §0 for change process.
 **Audience:** Coding agents and contributors building this project
 **Purpose:** This document is the source of truth for what Dev-Mem is, why it exists, what it must and must not do, and how it is built across versions. Any implementation decision that conflicts with this document should be flagged, not silently overridden.
 
@@ -205,6 +205,17 @@ Agent activity
 - Single batched LLM pass over the session's deterministic log → proposes typed nodes with evidence pointers
 - Extraction is the *only* place an LLM call is allowed in the capture path
 
+### 7.3 Hook Failure Handling and Lifecycle Recovery
+
+Hooks are best-effort observers and must never terminate or otherwise disrupt the host coding agent. They write diagnostic messages to stderr and exit successfully when they cannot safely act.
+
+- **Malformed payloads:** invalid JSON, non-object input, unsupported event names, and missing/wrong-type `session_id` or `cwd` are logged and ignored. Unknown extra fields are ignored.
+- **Out-of-order events:** a tool event without a recorded SessionStart is captured with its supplied session ID so a restarted hook process can retain useful evidence. A SessionEnd or Cursor checkpoint without a prior SessionStart is logged and does not trigger extraction. Repeated SessionEnd/checkpoint delivery is harmless: extraction is serialized per session and a completed session is not extracted again.
+- **Cursor checkpoints:** `extraction_event_threshold` must be a positive integer; missing, unreadable, or invalid configuration logs a diagnostic and falls back to 10. A checkpoint trigger may race, but only one CLI extraction for a session may run or complete at a time.
+- **Shared local state:** the SQLite graph uses WAL mode and a 5-second busy timeout so concurrent hook processes wait briefly for a writer instead of failing immediately. Node plus lifecycle-history creation is transactional. If SQLite, the event log, or the filesystem is unavailable/corrupt/full, the affected hook logs the failure and no-ops; it must not claim successful capture or extraction.
+
+This is deliberately limited to safe failure and clear diagnostics. Dev-Mem does not attempt automatic repair of corrupted `.dev-mem/` state; users may restore it from a backup or remove it to begin a new local state store.
+
 
 
 ## 8. Retrieval: Budget-Constrained Ranking
@@ -362,6 +373,19 @@ This result was verified against the actual shipped adaptive default, not a plac
 - Eval harness re-run in cross-agent mode (agent A works, agent B picks up) — this is where the "reduce redundant discovery across agents" claim gets actually tested
 - Regression Intelligence extended across agents (an approach that failed under Codex should be flagged to Claude Code, and vice versa)
 
+**✅ V2 EXIT CRITERION MET — 2026-09-21**
+
+Results from `eval/results/eval-cross-agent-2026-09-21T16-44-00-031Z.md` (12-task Claude Code → Codex handoff, using the shipped adaptive retrieval budget and real content-string token counts):
+
+- Redundant discoveries: 13 eliminated (100%)
+- Regression repeat rate: 8.3% → 0.0%
+- Net token delta: **+562 tokens** (OFF: 4,661 / ON: 4,099)
+- Task success rate: 100% in both modes
+- Cross-agent retrieval: 17 Claude Code-authored nodes were retrieved and injected into Codex sessions
+- Cross-agent Regression Intelligence: Codex received a warning before re-attempting the SQLite approach previously recorded as failed by Claude Code
+
+The result was independently recomputed from the cross-agent harness's actual task, injection, and rediscovery strings; it does not reuse V1 totals. The numerically identical +562-token delta is expected because the shared task and dependency strings yield the same injection and avoided-rediscovery terms, while the agent-specific system-prompt difference is included in both OFF and ON totals and therefore cancels from the delta.
+
 
 
 ### V3 — Symbol-Level Grounding + Refinement (conditional)
@@ -450,4 +474,4 @@ dev-mem/
 
 ---
 
-*End of specification. This is v1.3, updated to reflect V1 feature-complete status (Claude Code, 2026-09-18). V1 exit criterion met; see §13. Ready for V2 (Codex/Cursor adapters).*
+*End of specification. This is v1.4, updated to reflect V2 feature-complete status (cross-agent handoff, 2026-09-21). V1 and V2 exit criteria are met; see §13. V3 remains conditional on evidence that file/commit-level grounding is insufficient.*

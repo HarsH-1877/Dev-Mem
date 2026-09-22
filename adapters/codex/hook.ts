@@ -17,14 +17,16 @@
  */
 import { readFileSync } from "node:fs";
 import { DeterministicCapture } from "../../core/capture/index.js";
+import { numberFor, parseHookPayload, recordFor, stringFor } from "../../core/hook-safety.js";
 import type { CodexHookInput } from "./types.js";
 
 function parseInput(): CodexHookInput | null {
   try {
     const inputStr = readFileSync(0, "utf-8");
     if (!inputStr) return null;
-    return JSON.parse(inputStr) as CodexHookInput;
-  } catch {
+    return parseHookPayload(inputStr, ["SessionStart", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"], "codex") as CodexHookInput | null;
+  } catch (error) {
+    console.error(`[dev-mem/codex] Ignoring unreadable hook input: ${(error as Error).message}`);
     return null;
   }
 }
@@ -35,15 +37,9 @@ async function main() {
     process.exit(0);
   }
 
-  const projectRoot = payload.cwd || process.cwd();
-
-  const capture = new DeterministicCapture({
-    projectRoot,
-    agent: "codex",             // ← differs from claude-code adapter
-    sessionId: payload.session_id,
-  });
-
   try {
+    const projectRoot = payload.cwd || process.cwd();
+    const capture = new DeterministicCapture({ projectRoot, agent: "codex", sessionId: payload.session_id });
     switch (payload.hook_event_name) {
       // ─── Session lifecycle ───────────────────────────────────────────────
 
@@ -86,15 +82,15 @@ async function main() {
       case "PreToolUse": {
         // Codex-only: fires BEFORE a tool executes. Record with exit_code -1
         // (outcome unknown at this point) so the session log has full lineage.
-        const toolName = payload.tool_name;
-        const toolInput = payload.tool_input || {};
+        const toolName = stringFor(payload.tool_name);
+        const toolInput = recordFor(payload.tool_input);
 
         let command = toolName;
         let args: string[] = [];
         let touchedFile: string | undefined;
 
         if (toolName === "Bash") {
-          command = toolInput.command || toolName;
+          command = stringFor(toolInput.command, toolName);
           args = [];
         } else if (
           toolName === "Write" ||
@@ -103,8 +99,9 @@ async function main() {
           toolName === "str_replace_editor"
         ) {
           command = toolName;
-          args = [toolInput.file_path ?? toolInput.path ?? ""];
-          touchedFile = toolInput.file_path ?? toolInput.path;
+          const filePath = stringFor(toolInput.file_path, stringFor(toolInput.path, ""));
+          args = [filePath];
+          touchedFile = filePath || undefined;
         } else {
           command = toolName;
           args = [JSON.stringify(toolInput)];
@@ -138,9 +135,9 @@ async function main() {
       }
 
       case "PostToolUse": {
-        const toolName = payload.tool_name;
-        const toolInput = payload.tool_input || {};
-        const toolResponse = payload.tool_response || {};
+        const toolName = stringFor(payload.tool_name);
+        const toolInput = recordFor(payload.tool_input);
+        const toolResponse = recordFor(payload.tool_response);
 
         let command = toolName;
         let args: string[] = [];
@@ -150,18 +147,19 @@ async function main() {
         let touchedFile: string | undefined;
 
         if (toolName === "Bash") {
-          command = toolInput.command || toolName;
-          stdout = toolResponse.output ?? toolResponse.stdout;
-          stderr = toolResponse.stderr;
-          exitCode = toolResponse.exit_code ?? 0;
+          command = stringFor(toolInput.command, toolName);
+          stdout = typeof toolResponse.output === "string" ? toolResponse.output : typeof toolResponse.stdout === "string" ? toolResponse.stdout : undefined;
+          stderr = typeof toolResponse.stderr === "string" ? toolResponse.stderr : undefined;
+          exitCode = numberFor(toolResponse.exit_code);
         } else if (
           toolName === "Write" ||
           toolName === "Edit" ||
           toolName === "str_replace_editor"
         ) {
           command = toolName;
-          args = [toolInput.file_path ?? toolInput.path ?? ""];
-          touchedFile = toolInput.file_path ?? toolInput.path;
+          const filePath = stringFor(toolInput.file_path, stringFor(toolInput.path, ""));
+          args = [filePath];
+          touchedFile = filePath || undefined;
         } else {
           command = toolName;
           args = [JSON.stringify(toolInput)];
@@ -193,6 +191,10 @@ async function main() {
 
       case "SessionEnd": {
         capture.endSession();
+        if (!capture.getEvents().some((event) => event.session_id === payload.session_id && event.type === "session_start")) {
+          console.error(`[dev-mem/codex] Ignoring SessionEnd without a prior SessionStart for ${payload.session_id}`);
+          break;
+        }
         // Detached spawn ensures extraction survives Codex's 1-3s synchronous timeout
         const cp = await import("node:child_process");
         const path = await import("node:path");

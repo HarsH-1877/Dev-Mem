@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { DeterministicCapture } from "../../core/capture/index.js";
+import { parseHookPayload, recordFor, stringFor } from "../../core/hook-safety.js";
 import type { ClaudeCodeHookInput } from "./types.js";
 
 function parseInput(): ClaudeCodeHookInput | null {
   try {
     const inputStr = readFileSync(0, "utf-8");
     if (!inputStr) return null;
-    return JSON.parse(inputStr) as ClaudeCodeHookInput;
+    return parseHookPayload(inputStr, ["SessionStart", "PostToolUse", "Stop", "SessionEnd"], "claude-code") as ClaudeCodeHookInput | null;
   } catch (e) {
+    console.error(`[dev-mem/claude-code] Ignoring unreadable hook input: ${(e as Error).message}`);
     return null;
   }
 }
@@ -19,15 +21,9 @@ async function main() {
     process.exit(0);
   }
 
-  const projectRoot = payload.cwd || process.cwd();
-
-  const capture = new DeterministicCapture({
-    projectRoot,
-    agent: "claude-code",
-    sessionId: payload.session_id,
-  });
-
   try {
+    const projectRoot = payload.cwd || process.cwd();
+    const capture = new DeterministicCapture({ projectRoot, agent: "claude-code", sessionId: payload.session_id });
     switch (payload.hook_event_name) {
       case "SessionStart": {
         capture.startSession();
@@ -73,9 +69,9 @@ async function main() {
       }
 
       case "PostToolUse": {
-        const toolName = payload.tool_name;
-        const toolInput = payload.tool_input || {};
-        const toolResponse = payload.tool_response || {};
+        const toolName = stringFor(payload.tool_name);
+        const toolInput = recordFor(payload.tool_input);
+        const toolResponse = recordFor(payload.tool_response);
 
         let command = toolName;
         let args: string[] = [];
@@ -85,13 +81,14 @@ async function main() {
         let touchedFile: string | undefined;
 
         if (toolName === "Bash" || toolName === "PowerShell") {
-          command = toolInput.command || toolName;
-          stdout = toolResponse.stdout;
-          stderr = toolResponse.stderr;
+          command = stringFor(toolInput.command, toolName);
+          stdout = typeof toolResponse.stdout === "string" ? toolResponse.stdout : undefined;
+          stderr = typeof toolResponse.stderr === "string" ? toolResponse.stderr : undefined;
         } else if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
           command = toolName;
-          args = [toolInput.file_path];
-          touchedFile = toolInput.file_path;
+          const filePath = stringFor(toolInput.file_path, "");
+          args = [filePath];
+          touchedFile = filePath || undefined;
         } else {
           command = toolName;
           args = [JSON.stringify(toolInput)];
@@ -131,6 +128,10 @@ async function main() {
 
       case "SessionEnd": {
         capture.endSession();
+        if (!capture.getEvents().some((event) => event.session_id === payload.session_id && event.type === "session_start")) {
+          console.error(`[dev-mem/claude-code] Ignoring SessionEnd without a prior SessionStart for ${payload.session_id}`);
+          break;
+        }
         // Detached spawn to avoid the 1.5s hook timeout (M4 fix)
         const cp = await import("node:child_process");
         const path = await import("node:path");

@@ -105,6 +105,11 @@ export class GraphStore {
 
     this.db = new Database(this.dbPath);
     this.db.exec("PRAGMA foreign_keys = ON");
+    // Concurrent hook processes may read and write the shared project store.
+    // WAL permits readers alongside a writer; busy_timeout lets SQLite wait for
+    // a short competing transaction instead of immediately failing with BUSY.
+    this.db.pragma("journal_mode = WAL");
+    this.db.pragma("busy_timeout = 5000");
     this.db.exec(SCHEMA_SQL);
   }
 
@@ -138,14 +143,13 @@ export class GraphStore {
       updated_at: timestamp,
     };
 
-    this.db
-      .prepare(
+    const insert = this.db.transaction(() => {
+      this.db.prepare(
         `INSERT INTO nodes (
            id, type, title, content, lifecycle_state,
            evidence_json, created_at, updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
+      ).run(
         node.id,
         node.type,
         node.title,
@@ -156,12 +160,12 @@ export class GraphStore {
         node.updated_at,
       );
 
-    this.db
-      .prepare(
+      this.db.prepare(
         `INSERT INTO lifecycle_history (node_id, from_state, to_state, timestamp)
          VALUES (?, NULL, ?, ?)`,
-      )
-      .run(node.id, node.lifecycle_state, timestamp);
+      ).run(node.id, node.lifecycle_state, timestamp);
+    });
+    insert();
 
     return node;
   }

@@ -16,8 +16,12 @@ export class EventLog {
     if (this.persistPath && existsSync(this.persistPath)) {
       const text = readFileSync(this.persistPath, "utf8").trim();
       if (text !== "") {
-        for (const line of text.split("\n")) {
-          this.events.push(JSON.parse(line) as CaptureEvent);
+        for (const [index, line] of text.split("\n").entries()) {
+          try {
+            this.events.push(JSON.parse(line) as CaptureEvent);
+          } catch (error) {
+            throw new Error(`Corrupt event log at line ${index + 1}: ${(error as Error).message}`);
+          }
         }
       }
     }

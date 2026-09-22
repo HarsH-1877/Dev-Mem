@@ -13,43 +13,34 @@
  *   - Implements the §7.2 N-accumulated-events checkpoint trigger for batched
  *     LLM extraction on `stop` to compensate for the missing SessionEnd.
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DeterministicCapture } from "../../core/capture/index.js";
 import { EventLog } from "../../core/capture/log.js";
+import { getExtractionEventThreshold } from "../../core/checkpoint.js";
+import { numberFor, parseHookPayload, recordFor, stringFor } from "../../core/hook-safety.js";
 import type { CursorHookInput } from "./types.js";
 
 function parseInput(): CursorHookInput | null {
   try {
     const inputStr = readFileSync(0, "utf-8");
     if (!inputStr) return null;
-    return JSON.parse(inputStr) as CursorHookInput;
-  } catch {
+    return parseHookPayload(inputStr, ["sessionStart", "preToolUse", "postToolUse", "stop"], "cursor") as CursorHookInput | null;
+  } catch (error) {
+    console.error(`[dev-mem/cursor] Ignoring unreadable hook input: ${(error as Error).message}`);
     return null;
   }
-}
-
-function getExtractionThreshold(projectRoot: string): number {
-  const configPath = join(projectRoot, ".dev-mem", "config.yml");
-  if (existsSync(configPath)) {
-    try {
-      const content = readFileSync(configPath, "utf-8");
-      const match = content.match(/extraction_event_threshold:\s*(\\d+)/);
-      if (match && match[1]) {
-        return parseInt(match[1], 10);
-      }
-    } catch {
-      // fallback to default
-    }
-  }
-  return 10; // Sensible default: every 10 tool calls
 }
 
 async function triggerExtractionIfThresholdMet(projectRoot: string, sessionId: string) {
   try {
     const log = new EventLog({ persistPath: join(projectRoot, ".dev-mem", "events.jsonl") });
+    if (!log.getEvents().some((event) => event.session_id === sessionId && event.type === "session_start")) {
+      console.error(`[dev-mem/cursor] Skipping checkpoint without a prior SessionStart for ${sessionId}`);
+      return;
+    }
     const events = log.getEvents().filter(e => e.session_id === sessionId && e.type === "tool_call" && (e as any).exit_code !== -1);
-    const threshold = getExtractionThreshold(projectRoot);
+    const threshold = getExtractionEventThreshold(projectRoot);
 
     // If we just hit a multiple of N (and N > 0), trigger the extraction spawn
     if (events.length > 0 && events.length % threshold === 0) {
@@ -67,7 +58,7 @@ async function triggerExtractionIfThresholdMet(projectRoot: string, sessionId: s
       child.unref();
     }
   } catch (err) {
-    // Fail gracefully on extraction trigger errors
+    console.error(`[dev-mem/cursor] Checkpoint trigger skipped: ${(err as Error).message}`);
   }
 }
 
@@ -77,15 +68,9 @@ async function main() {
     process.exit(0);
   }
 
-  const projectRoot = payload.cwd || process.cwd();
-
-  const capture = new DeterministicCapture({
-    projectRoot,
-    agent: "cursor",
-    sessionId: payload.session_id,
-  });
-
   try {
+    const projectRoot = payload.cwd || process.cwd();
+    const capture = new DeterministicCapture({ projectRoot, agent: "cursor", sessionId: payload.session_id });
     switch (payload.hook_event_name) {
       // ─── Session lifecycle ───────────────────────────────────────────────
 
@@ -125,15 +110,15 @@ async function main() {
       // ─── Tool-call recording ─────────────────────────────────────────────
 
       case "preToolUse": {
-        const toolName = payload.tool_name;
-        const toolInput = payload.tool_input || {};
+        const toolName = stringFor(payload.tool_name);
+        const toolInput = recordFor(payload.tool_input);
 
         let command = toolName;
         let args: string[] = [];
         let touchedFile: string | undefined;
 
         if (toolName === "Bash" || toolName === "Terminal") {
-          command = toolInput.command || toolName;
+          command = stringFor(toolInput.command, toolName);
           args = [];
         } else if (
           toolName === "Write" ||
@@ -141,8 +126,9 @@ async function main() {
           toolName === "str_replace_editor"
         ) {
           command = toolName;
-          args = [toolInput.file_path ?? toolInput.path ?? ""];
-          touchedFile = toolInput.file_path ?? toolInput.path;
+          const filePath = stringFor(toolInput.file_path, stringFor(toolInput.path, ""));
+          args = [filePath];
+          touchedFile = filePath || undefined;
         } else {
           command = toolName;
           args = [JSON.stringify(toolInput)];
@@ -172,9 +158,9 @@ async function main() {
       }
 
       case "postToolUse": {
-        const toolName = payload.tool_name;
-        const toolInput = payload.tool_input || {};
-        const toolResponse = payload.tool_response || {};
+        const toolName = stringFor(payload.tool_name);
+        const toolInput = recordFor(payload.tool_input);
+        const toolResponse = recordFor(payload.tool_response);
 
         let command = toolName;
         let args: string[] = [];
@@ -184,18 +170,19 @@ async function main() {
         let touchedFile: string | undefined;
 
         if (toolName === "Bash" || toolName === "Terminal") {
-          command = toolInput.command || toolName;
-          stdout = toolResponse.output ?? toolResponse.stdout;
-          stderr = toolResponse.stderr;
-          exitCode = toolResponse.exit_code ?? 0;
+          command = stringFor(toolInput.command, toolName);
+          stdout = typeof toolResponse.output === "string" ? toolResponse.output : typeof toolResponse.stdout === "string" ? toolResponse.stdout : undefined;
+          stderr = typeof toolResponse.stderr === "string" ? toolResponse.stderr : undefined;
+          exitCode = numberFor(toolResponse.exit_code);
         } else if (
           toolName === "Write" ||
           toolName === "Edit" ||
           toolName === "str_replace_editor"
         ) {
           command = toolName;
-          args = [toolInput.file_path ?? toolInput.path ?? ""];
-          touchedFile = toolInput.file_path ?? toolInput.path;
+          const filePath = stringFor(toolInput.file_path, stringFor(toolInput.path, ""));
+          args = [filePath];
+          touchedFile = filePath || undefined;
         } else {
           command = toolName;
           args = [JSON.stringify(toolInput)];

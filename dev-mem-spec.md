@@ -72,7 +72,7 @@ This mirrors how comparable tools in this space distribute (e.g. `npx claude-mem
 - **License:** MIT (matches ecosystem norms for this category — keeps the tool easy to embed in other developer tooling).
 - **Local data location:** a `.dev-mem/` directory created at the root of the user's project (sibling to `.claude/`), containing:
   - `.dev-mem/graph.sqlite` — the knowledge graph store (§5) — see §14a for confidence level on this choice
-  - `.dev-mem/config.yml` — user-configurable settings (token budget cap, extraction checkpoint frequency, enabled adapters)
+  - `.dev-mem/config.yml` — user-configurable settings. Currently only `extraction_event_threshold` (positive integer, default 10) is read; this controls how often Cursor triggers extraction in the absence of a reliable SessionEnd event. Token budget and enabled-adapters settings are described in §8 and §12 but are not yet configurable through this file.
   - `.dev-mem/` should be gitignored by default, with an explicit opt-in flag if a team wants to commit and share it.
 
 
@@ -80,13 +80,15 @@ This mirrors how comparable tools in this space distribute (e.g. `npx claude-mem
 ### 3.4 CLI Commands (V1 minimum surface)
 
 
-| Command                     | Purpose                                                                                                          |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `dev-mem install`           | Detects the current project's agent(s), wires hooks, creates `.dev-mem/`                                         |
-| `dev-mem status`            | Shows graph size, last capture time, current token budget config                                                 |
-| `dev-mem query "<text>"`    | Manually runs retrieval for a given task description (useful for debugging/demoing outside a live agent session) |
-| `dev-mem inspect <node-id>` | Prints a single node's full evidence and lifecycle history                                                       |
-| `dev-mem uninstall`         | Removes hooks; leaves `.dev-mem/` data intact unless `--purge` is passed                                         |
+| Command                     | Purpose                                                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `dev-mem install`           | Detects the current project's agent(s), wires hooks, creates `.dev-mem/`                                                                   |
+| `dev-mem status`            | Shows graph size, last capture time, lifecycle state breakdown                                                                             |
+| `dev-mem query "<text>"`    | _Not yet implemented._ Planned: manually run retrieval for a given task description                                                        |
+| `dev-mem inspect <node-id>` | _Not yet implemented._ Planned: print a single node's full evidence and lifecycle history                                                  |
+| `dev-mem uninstall`         | Removes hooks from all detected agent configs; leaves `.dev-mem/` data intact unless `--purge` is passed                                   |
+| `dev-mem wrap <cmd> [args]` | Runs a command and flushes any remaining captured events through extraction on exit; primarily useful for Cursor (missing reliable SessionEnd) |
+| `dev-mem extract <session>` | Manually triggers extraction for a session ID; normally invoked automatically by hooks; skips silently if already complete for that session |
 
 
 

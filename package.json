@@ -1,7 +1,7 @@
 {
   "name": "dev-mem",
   "version": "0.1.0",
-  "description": "Shared, verified development state for coding agents",
+  "description": "Shared, verified development state for AI coding agents — preserves decisions, failed approaches, and discoveries across sessions and agent switches",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -18,8 +18,28 @@
     "./consistency": "./dist/core/consistency/index.js"
   },
   "files": [
-    "dist"
+    "dist/cli",
+    "dist/core",
+    "dist/adapters",
+    "README.md",
+    "LICENSE"
   ],
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "claude-code",
+    "codex",
+    "cursor",
+    "memory",
+    "knowledge-graph",
+    "development-state",
+    "context",
+    "hooks"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dev-mem/dev-mem"
+  },
   "engines": {
     "node": ">=22.13"
   },

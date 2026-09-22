@@ -84,8 +84,8 @@ This mirrors how comparable tools in this space distribute (e.g. `npx claude-mem
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `dev-mem install`           | Detects the current project's agent(s), wires hooks, creates `.dev-mem/`                                                                   |
 | `dev-mem status`            | Shows graph size, last capture time, lifecycle state breakdown                                                                             |
-| `dev-mem query "<text>"`    | _Not yet implemented._ Planned: manually run retrieval for a given task description                                                        |
-| `dev-mem inspect <node-id>` | _Not yet implemented._ Planned: print a single node's full evidence and lifecycle history                                                  |
+| `dev-mem query "<text>"`    | Runs retrieval for a given task description and prints the §9-format context a session would receive; uses the same adaptive budget and relevance scoring as the live SessionStart hook |
+| `dev-mem inspect <node-id>` | Prints a single node's full fields, evidence, lifecycle history, and edges                                                                                                            |
 | `dev-mem uninstall`         | Removes hooks from all detected agent configs; leaves `.dev-mem/` data intact unless `--purge` is passed                                   |
 | `dev-mem wrap <cmd> [args]` | Runs a command and flushes any remaining captured events through extraction on exit; primarily useful for Cursor (missing reliable SessionEnd) |
 | `dev-mem extract <session>` | Manually triggers extraction for a session ID; normally invoked automatically by hooks; skips silently if already complete for that session |

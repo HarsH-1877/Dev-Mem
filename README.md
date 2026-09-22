@@ -134,15 +134,69 @@ If extraction is already running or has already completed for that session, it p
 
 ---
 
-### `dev-mem query "<text>"` — not yet implemented
+### `dev-mem query "<text>"`
 
-Accepted by the CLI but currently returns `not yet implemented`. Planned: run retrieval manually for a given task description, useful for testing what context would be injected.
+Manually runs retrieval for a given task description and prints the context a session would receive. Useful for debugging what's in the graph or checking that extraction captured something correctly.
+
+```
+dev-mem query "add authentication to the API"
+```
+
+Example output:
+
+```
+<dev_mem_context>
+Relevant context from previous development sessions:
+
+[DECISION] (confidence: 0.91, observed today)
+Use Firebase Auth for server-side authentication.
+Evidence: commit a1b2c3, src/auth/session.ts
+
+[FAILED APPROACH] (confidence: 0.88, observed today)
+Client-side JWT verification caused session inconsistency.
+Evidence: commit b3c4d5, src/auth/legacy.ts
+</dev_mem_context>
+```
+
+Uses the same adaptive budget and relevance scoring as the live SessionStart hook. Returns `No relevant context found in graph.` if the graph is empty or nothing scores above the budget threshold.
 
 ---
 
-### `dev-mem inspect <node-id>` — not yet implemented
+### `dev-mem inspect <node-id>`
 
-Accepted by the CLI but currently returns `not yet implemented`. Planned: print a single node's full content, evidence, and lifecycle history.
+Prints the full detail of a single knowledge node — all fields, evidence, lifecycle history, and any edges connecting it to other nodes.
+
+```
+dev-mem inspect <uuid>
+```
+
+Get node IDs from `dev-mem status` (lists counts by type) or from `dev-mem query` output (each result includes the evidence commit; run query first to find candidates). Example output:
+
+```
+id:              3f2a1b4c-...
+type:            Decision
+lifecycle_state: observed
+title:           Use Firebase Auth for server-side authentication
+content:         Firebase Admin validates tokens server-side, removing client-side concerns.
+created_at:      2026-09-18T14:22:07.031Z
+updated_at:      2026-09-18T14:22:07.031Z
+
+evidence:
+  commit:     abc1234def5678901234567890abcdef12345678
+  files:      src/auth/session.ts
+  session_id: sess_abc123
+  agent:      claude-code
+  timestamp:  2026-09-18T14:22:07.031Z
+  confidence: 0.91
+
+lifecycle_history:
+  2026-09-18T14:22:07.031Z  (created) → observed
+
+edges:
+  [contradicts] → <uuid-of-conflicting-node>
+```
+
+Returns exit code 1 with `Node not found: <id>` if the ID doesn't exist.
 
 ---
 

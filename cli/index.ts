@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 
 const COMMANDS = [
   "install",
@@ -22,6 +22,7 @@ import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync } 
 import { ensureLocalDataDir, getEventsLogPath } from "../core/local-data.js";
 import { GraphStore } from "../core/graph/index.js";
 import { acquireExtractionLock, markExtractionComplete } from "../core/extraction-lock.js";
+import { retrieveContext, generateInjectionString } from "../core/retrieval/index.js";
 
 function getHookScriptCode(eventName: string): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -488,16 +489,89 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
           });
         });
       });
+    } else if (command === "query") {
+      const text = args[0];
+      if (!text) {
+        return { exitCode: 1, stdout: "", stderr: "Usage: dev-mem query \"<task description>\"\n" };
+      }
+      const nodes = retrieveContext({ projectRoot: cwd, currentTask: text });
+      const out = generateInjectionString(nodes);
+      if (!out) {
+        return { exitCode: 0, stdout: "No relevant context found in graph.\n", stderr: "" };
+      }
+      return { exitCode: 0, stdout: out + "\n", stderr: "" };
+
+    } else if (command === "inspect") {
+      const nodeId = args[0];
+      if (!nodeId) {
+        return { exitCode: 1, stdout: "", stderr: "Usage: dev-mem inspect <node-id>\n" };
+      }
+      const store = new GraphStore({ projectRoot: cwd });
+      let out: string;
+      try {
+        const node = store.getNode(nodeId);
+        if (!node) {
+          return { exitCode: 1, stdout: "", stderr: `Node not found: ${nodeId}\n` };
+        }
+        const history = store.listLifecycleHistory(nodeId);
+        const edges = store.listEdges(nodeId);
+
+        const lines: string[] = [];
+        lines.push(`id:              ${node.id}`);
+        lines.push(`type:            ${node.type}`);
+        lines.push(`lifecycle_state: ${node.lifecycle_state}`);
+        lines.push(`title:           ${node.title}`);
+        lines.push(`content:         ${node.content || "(empty)"}`);
+        lines.push(`created_at:      ${node.created_at}`);
+        lines.push(`updated_at:      ${node.updated_at}`);
+        lines.push("");
+        lines.push("evidence:");
+        lines.push(`  commit:     ${node.evidence.commit}`);
+        lines.push(`  files:      ${node.evidence.files.join(", ")}`);
+        if (node.evidence.diff_ref) lines.push(`  diff_ref:   ${node.evidence.diff_ref}`);
+        if (node.evidence.test_ref) lines.push(`  test_ref:   ${node.evidence.test_ref}`);
+        if (node.evidence.symbols?.length) lines.push(`  symbols:    ${node.evidence.symbols.join(", ")}`);
+        lines.push(`  session_id: ${node.evidence.session_id}`);
+        lines.push(`  agent:      ${node.evidence.agent}`);
+        lines.push(`  timestamp:  ${node.evidence.timestamp}`);
+        lines.push(`  confidence: ${node.evidence.confidence.toFixed(2)}`);
+
+        lines.push("");
+        lines.push("lifecycle_history:");
+        for (const h of history) {
+          const from = h.from_state ?? "(created)";
+          lines.push(`  ${h.timestamp}  ${from} → ${h.to_state}`);
+        }
+
+        if (edges.length > 0) {
+          lines.push("");
+          lines.push("edges:");
+          for (const e of edges) {
+            const dir = e.from_id === node.id ? "→" : "←";
+            const other = e.from_id === node.id ? e.to_id : e.from_id;
+            lines.push(`  [${e.type}] ${dir} ${other}`);
+          }
+        }
+
+        out = lines.join("\n") + "\n";
+      } finally {
+        store.close();
+      }
+      return { exitCode: 0, stdout: out, stderr: "" };
     }
   } catch (e: any) {
     return { exitCode: 1, stdout: "", stderr: e.message + "\n" };
   }
 
-  // Full command logic is a later milestone. Surface exists now (spec §3.4).
-  return { exitCode: 0, stdout: "not yet implemented\n", stderr: "" };
+  // Should not be reached — all commands in COMMANDS have explicit branches above.
+  return { exitCode: 1, stdout: "", stderr: `Command "${command}" is not yet implemented.\n` };
 }
 
-const isDirectRun = true;
+const isDirectRun =
+  typeof process.argv[1] === "string" &&
+  (process.argv[1].endsWith("cli/index.js") ||
+    process.argv[1].endsWith("cli\\index.js") ||
+    process.argv[1].endsWith("dev-mem"));
 
 if (isDirectRun) {
   runCli(process.argv.slice(2)).then((result) => {

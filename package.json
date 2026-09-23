@@ -38,10 +38,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/dev-mem/dev-mem"
+    "url": "https://github.com/HarsH-1877/Dev-Mem"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsc",

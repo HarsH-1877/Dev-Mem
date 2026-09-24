@@ -1,7 +1,7 @@
 /**
  * SQLite schema for the knowledge graph (spec §5, §14).
  *
- * Driver is Node's built-in `node:sqlite` (experimental as of Node 22).
+ * Driver is better-sqlite3 (swapped from node:sqlite in V2).
  * The SQLite+CTE choice itself is unvalidated per spec §14a — keep the
  * GraphStore public API stable if the backend is swapped later.
  */

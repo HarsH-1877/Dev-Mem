@@ -8,7 +8,7 @@ Everything stays on your machine. No server, no network dependency beyond your e
 
 ## Requirements
 
-- Node.js 22.13+
+- Node.js 22+
 - An existing project with at least one of: `.claude/`, `.codex/`, or `.cursor/` already present (or a Claude Code project, which creates `.claude/` automatically)
 - `ANTHROPIC_API_KEY` in your environment (used by the extraction step only)
 

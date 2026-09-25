@@ -5,8 +5,7 @@ import type { CaptureEvent, FileTouchEvent, GitSnapshotEvent, ToolCallEvent } fr
 import type { CreateNodeInput, KnowledgeNode, NodeType } from "../graph/types.js";
 import { NODE_TYPES } from "../graph/types.js";
 import { checkContradictions, checkStaleness } from "../consistency/index.js";
-
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+import { resolveProvider } from "../llm/index.js";
 
 export interface ExtractionOptions {
   projectRoot: string;
@@ -15,6 +14,8 @@ export interface ExtractionOptions {
   mockLlm?: boolean;
   customLlmResponse?: string;
   model?: string;
+  provider?: string;
+  baseUrl?: string;
 }
 
 export interface ExtractionResult {
@@ -213,37 +214,28 @@ ${sessionEvents.map((e) => JSON.stringify(e)).join("\n")}
 
       responseText = JSON.stringify({ nodes: mockNodes });
     } else {
-      const key = apiKey || process.env.ANTHROPIC_API_KEY;
-      if (!key) {
-        console.warn("[dev-mem] No ANTHROPIC_API_KEY available. Skipping live LLM extraction.");
-        return { success: false, nodes: [], error: "No ANTHROPIC_API_KEY configured" };
+      const llm = resolveProvider({
+        apiKey,
+        provider: options.provider,
+        model,
+        baseUrl: options.baseUrl,
+      });
+      if (!llm) {
+        console.warn("[dev-mem] No LLM provider available. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or DEV_MEM_LLM_BASE_URL. Skipping extraction.");
+        return { success: false, nodes: [], error: "No LLM provider available — set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or DEV_MEM_LLM_BASE_URL" };
       }
 
-      const response = await fetch(ANTHROPIC_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": key,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: model || "claude-3-5-sonnet-20241022",
-          max_tokens: 4096,
-          system: "You extract structured development knowledge nodes from session event logs. Return JSON only.",
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-
-      if (!response.ok) {
-        const errBody = await response.text();
-        const msg = `Anthropic API error (${response.status}): ${errBody}`;
+      try {
+        responseText = await llm.complete(
+          "You extract structured development knowledge nodes from session event logs. Return JSON only.",
+          prompt,
+          4096,
+        );
+      } catch (llmErr: any) {
+        const msg = `LLM call failed (${llm.name}): ${llmErr.message}`;
         console.error(`[dev-mem] ${msg}`);
         return { success: false, nodes: [], error: msg };
       }
-
-      const data = (await response.json()) as any;
-      const block = data?.content?.find((c: any) => c.type === "text");
-      responseText = block?.text || "";
     }
 
     // 5. Parse JSON output

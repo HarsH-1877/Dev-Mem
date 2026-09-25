@@ -250,4 +250,34 @@ describe("Batched LLM Extraction (spec §7.2)", () => {
     expect(result.nodes.length).toBe(1);
     expect(result.nodes[0].type).toBe("Discovery");
   });
+
+  it("reports a clear error when no LLM provider is available (no env key set)", async () => {
+    const saved = { ...process.env };
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+    delete process.env.DEV_MEM_LLM_BASE_URL;
+    delete process.env.DEV_MEM_LLM_API_KEY;
+    delete process.env.DEV_MEM_LLM_PROVIDER;
+
+    // Create at least one event for session "provider-test" so extraction doesn't short-circuit
+    const capture = new DeterministicCapture({
+      projectRoot: testDir,
+      agent: "claude-code",
+      sessionId: "provider-test",
+    });
+    capture.startSession();
+    capture.endSession();
+
+    const result = await runExtraction({
+      projectRoot: testDir,
+      sessionId: "provider-test",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No LLM provider");
+
+    Object.assign(process.env, saved);
+  });
 });

@@ -10,7 +10,11 @@ Everything stays on your machine. No server, no network dependency beyond your e
 
 - Node.js 22+
 - An existing project with at least one of: `.claude/`, `.codex/`, or `.cursor/` already present (or a Claude Code project, which creates `.claude/` automatically)
-- `ANTHROPIC_API_KEY` in your environment (used by the extraction step only)
+- An LLM API key for the extraction step — any ONE of:
+  - `ANTHROPIC_API_KEY` (Claude)
+  - `OPENAI_API_KEY` (GPT-4o / GPT-4o-mini)
+  - `GEMINI_API_KEY` or `GOOGLE_API_KEY` (Gemini)
+  - `DEV_MEM_LLM_BASE_URL` pointed at any OpenAI-compatible endpoint (Ollama, Groq, OpenRouter, LM Studio, DeepSeek) — no API key required for local Ollama
 
 ---
 

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveProvider } from "./index.js";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { resolveProvider, resolveProviderForProject } from "./index.js";
 import { createOpenAIProvider } from "./openai.js";
 import { createGeminiProvider } from "./gemini.js";
 
@@ -74,4 +77,21 @@ describe("Gemini Provider", () => {
   });
 });
 
+describe("Config-based provider resolution", () => {
+  it("reads llm_provider and llm_base_url from .dev-mem/config.yml", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "dev-mem-llm-cfg-"));
+    try {
+      mkdirSync(join(cwd, ".dev-mem"));
+      writeFileSync(join(cwd, ".dev-mem", "config.yml"),
+        "llm_provider: openai-compatible\nllm_base_url: http://localhost:11434/v1\n"
+      );
+
+      const provider = resolveProviderForProject(cwd);
+      expect(provider).not.toBeNull();
+      expect(provider!.name).toBe("openai-compatible");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
 

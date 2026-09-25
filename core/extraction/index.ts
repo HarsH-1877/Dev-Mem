@@ -5,7 +5,7 @@ import type { CaptureEvent, FileTouchEvent, GitSnapshotEvent, ToolCallEvent } fr
 import type { CreateNodeInput, KnowledgeNode, NodeType } from "../graph/types.js";
 import { NODE_TYPES } from "../graph/types.js";
 import { checkContradictions, checkStaleness } from "../consistency/index.js";
-import { resolveProvider } from "../llm/index.js";
+import { resolveProviderForProject } from "../llm/index.js";
 
 export interface ExtractionOptions {
   projectRoot: string;
@@ -214,7 +214,7 @@ ${sessionEvents.map((e) => JSON.stringify(e)).join("\n")}
 
       responseText = JSON.stringify({ nodes: mockNodes });
     } else {
-      const llm = resolveProvider({
+      const llm = resolveProviderForProject(projectRoot, {
         apiKey,
         provider: options.provider,
         model,

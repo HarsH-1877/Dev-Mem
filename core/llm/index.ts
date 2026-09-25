@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { LlmProvider, ProviderResolutionOptions } from "./types.js";
 import { createAnthropicProvider } from "./anthropic.js";
 import { createOpenAIProvider } from "./openai.js";
@@ -63,4 +65,41 @@ export function resolveProvider(options?: ProviderResolutionOptions): LlmProvide
   }
 
   return null;
+}
+
+/**
+ * Reads LLM configuration from .dev-mem/config.yml and merges with env vars.
+ * Config file values are lower priority than explicit env vars/options.
+ */
+export function resolveProviderForProject(projectRoot: string, options?: ProviderResolutionOptions): LlmProvider | null {
+  const configPath = join(projectRoot, ".dev-mem", "config.yml");
+  let fileProvider: string | undefined;
+  let fileModel: string | undefined;
+  let fileBaseUrl: string | undefined;
+  let fileApiKey: string | undefined;
+
+  if (existsSync(configPath)) {
+    try {
+      const content = readFileSync(configPath, "utf8");
+      const providerMatch = content.match(/^\s*llm_provider\s*:\s*(\S+)\s*$/m);
+      const modelMatch = content.match(/^\s*llm_model\s*:\s*(\S+)\s*$/m);
+      const baseUrlMatch = content.match(/^\s*llm_base_url\s*:\s*(\S+)\s*$/m);
+      const apiKeyMatch = content.match(/^\s*llm_api_key\s*:\s*(\S+)\s*$/m);
+
+      if (providerMatch) fileProvider = providerMatch[1];
+      if (modelMatch) fileModel = modelMatch[1];
+      if (baseUrlMatch) fileBaseUrl = baseUrlMatch[1];
+      if (apiKeyMatch) fileApiKey = apiKeyMatch[1];
+    } catch {
+      // Ignore unreadable config
+    }
+  }
+
+  return resolveProvider({
+    provider: options?.provider || fileProvider,
+    model: options?.model || fileModel,
+    baseUrl: options?.baseUrl || fileBaseUrl,
+    apiKey: options?.apiKey || fileApiKey,
+    ...options, // explicit options override file-based defaults
+  });
 }

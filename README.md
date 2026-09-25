@@ -265,7 +265,7 @@ Each item includes confidence and recency so the agent can weight trust appropri
 
 **Single machine, local only.** `.dev-mem/` is gitignored by default. If you work across multiple machines or want to share knowledge graph state across a team, you would need to opt `.dev-mem/` into version control (`git add -f .dev-mem/` or remove it from `.gitignore`). There is no sync mechanism built in.
 
-**Single LLM provider.** Extraction currently calls the Anthropic API (`claude-3-5-sonnet-20241022`). The `ANTHROPIC_API_KEY` environment variable must be set for extraction to run. If it isn't set, extraction is skipped silently and no nodes are written for that session.
+
 
 ---
 

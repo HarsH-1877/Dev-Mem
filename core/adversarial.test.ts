@@ -110,13 +110,13 @@ describe("Adversarial & Edge Cases (Core)", () => {
           type: "Discovery",
           title: "Node " + i,
           content: "Content " + i,
-          evidence: { source: "test", commit: "test_commit", files: ["file.ts"], session_id: "s1", agent: "test", timestamp: new Date().toISOString() },
+          evidence: { source: "test", commit: "test_commit", files: ["file.ts"], session_id: "s1", agent: "test", timestamp: new Date().toISOString(), confidence: 1.0 },
           files: ["file.ts"]
         });
       }
       
-      // budget calculation requires a temporary GraphStore inside adaptiveBudget, it should close it
-      const budget = adaptiveBudget(cwd);
+      // budget calculation requires nodeCount
+      const budget = adaptiveBudget(500);
       expect(budget).toBe(2000);
       
       const t0 = Date.now();

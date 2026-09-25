@@ -30,14 +30,17 @@ export function resolveProvider(options?: ProviderResolutionOptions): LlmProvide
   const model = options?.model || process.env.DEV_MEM_LLM_MODEL;
 
   // 1. Explicit provider requested
-  if (provider === "anthropic" && apiKey) {
-    return createAnthropicProvider(apiKey, model);
+  if (provider === "anthropic") {
+    const key = apiKey || process.env.ANTHROPIC_API_KEY;
+    if (key) return createAnthropicProvider(key, model);
   }
-  if (provider === "openai" && apiKey) {
-    return createOpenAIProvider(apiKey, model);
+  if (provider === "openai") {
+    const key = apiKey || process.env.OPENAI_API_KEY;
+    if (key) return createOpenAIProvider(key, model);
   }
-  if (provider === "gemini" && apiKey) {
-    return createGeminiProvider(apiKey, model);
+  if (provider === "gemini") {
+    const key = apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    if (key) return createGeminiProvider(key, model);
   }
   if (provider === "openai-compatible" && baseUrl) {
     return createOpenAIProvider(apiKey || "ollama", model, baseUrl);
@@ -81,10 +84,10 @@ export function resolveProviderForProject(projectRoot: string, options?: Provide
   if (existsSync(configPath)) {
     try {
       const content = readFileSync(configPath, "utf8");
-      const providerMatch = content.match(/^\s*llm_provider\s*:\s*(\S+)\s*$/m);
-      const modelMatch = content.match(/^\s*llm_model\s*:\s*(\S+)\s*$/m);
-      const baseUrlMatch = content.match(/^\s*llm_base_url\s*:\s*(\S+)\s*$/m);
-      const apiKeyMatch = content.match(/^\s*llm_api_key\s*:\s*(\S+)\s*$/m);
+      const providerMatch = content.match(/^\s*llm_provider\s*:\s*['"]?([^'"\s]+)['"]?\s*$/m);
+      const modelMatch = content.match(/^\s*llm_model\s*:\s*['"]?([^'"\s]+)['"]?\s*$/m);
+      const baseUrlMatch = content.match(/^\s*llm_base_url\s*:\s*['"]?([^'"\s]+)['"]?\s*$/m);
+      const apiKeyMatch = content.match(/^\s*llm_api_key\s*:\s*['"]?([^'"\s]+)['"]?\s*$/m);
 
       if (providerMatch) fileProvider = providerMatch[1];
       if (modelMatch) fileModel = modelMatch[1];
@@ -95,11 +98,11 @@ export function resolveProviderForProject(projectRoot: string, options?: Provide
     }
   }
 
+  // Explicit options take precedence over file configs
   return resolveProvider({
-    provider: options?.provider || fileProvider,
-    model: options?.model || fileModel,
-    baseUrl: options?.baseUrl || fileBaseUrl,
-    apiKey: options?.apiKey || fileApiKey,
-    ...options, // explicit options override file-based defaults
+    provider: options?.provider !== undefined ? options.provider : fileProvider,
+    model: options?.model !== undefined ? options.model : fileModel,
+    baseUrl: options?.baseUrl !== undefined ? options.baseUrl : fileBaseUrl,
+    apiKey: options?.apiKey !== undefined ? options.apiKey : fileApiKey,
   });
 }

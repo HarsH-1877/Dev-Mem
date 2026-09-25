@@ -53,6 +53,65 @@ await import(pathToFileURL("${distDir}/adapters/cursor/hook.js").href);
 `;
 }
 
+function getOpenCodeHookScriptCode(): string {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  const distDir = join(currentDir, "..").replace(/\\/g, "/");
+
+  return `import { spawnSync } from "node:child_process";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+export default async function DevMemPlugin(input, options) {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  const projectRoot = join(currentDir, "../.."); // up from .opencode/plugins/
+  const hookPath = fileURLToPath(pathToFileURL("${distDir}/adapters/opencode/hook.js"));
+
+  function runHookSync(eventName, payload) {
+    try {
+      const res = spawnSync("node", [hookPath], {
+        input: JSON.stringify({ hook_event_name: eventName, cwd: projectRoot, ...payload }),
+        encoding: "utf8",
+      });
+      if (res.stdout) {
+        try {
+          const out = JSON.parse(res.stdout);
+          return out.hookSpecificOutput;
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  return {
+    "chat.message": async (pluginInput, output) => {
+      const res = runHookSync("chat.message", { session_id: pluginInput.sessionID, message: pluginInput.message });
+      if (res && res.additionalContext) {
+        output.message.parts.push({ type: "text", text: "\\n\\n" + res.additionalContext });
+      }
+    },
+    "tool.execute.after": async (pluginInput, output) => {
+      const res = runHookSync("tool.execute.after", {
+        session_id: pluginInput.sessionID,
+        callID: pluginInput.callID,
+        tool: pluginInput.tool,
+        args: pluginInput.args,
+        output: output.output,
+        metadata: output.metadata,
+      });
+      if (res && res.additionalContext) {
+        // We can append warning to output if necessary, but typically we just log it in dev-mem
+      }
+    },
+    event: async ({ event }) => {
+      if (event.type === "session.status" && (event.properties || event.data)?.status?.type === "idle") {
+        runHookSync("session.idle", { session_id: event.properties?.sessionID || event.data?.sessionID || "unknown" });
+      }
+    }
+  };
+}
+`;
+}
+
 function installClaudeCodeHooks(cwd: string) {
   const claudeDir = join(cwd, ".claude");
   if (!existsSync(claudeDir)) {
@@ -216,15 +275,54 @@ function installCursorHooks(cwd: string) {
   writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2), "utf8");
 }
 
+function installOpenCodeHooks(cwd: string) {
+  const opencodeDir = join(cwd, ".opencode");
+  if (!existsSync(opencodeDir)) {
+    mkdirSync(opencodeDir, { recursive: true });
+  }
+
+  const pluginsDir = join(opencodeDir, "plugins");
+  if (!existsSync(pluginsDir)) {
+    mkdirSync(pluginsDir, { recursive: true });
+  }
+
+  const scriptPath = join(pluginsDir, "dev-mem.ts");
+  writeFileSync(scriptPath, getOpenCodeHookScriptCode(), "utf8");
+
+  const configPath = join(opencodeDir, "opencode.json");
+  let config: any = {};
+  if (existsSync(configPath)) {
+    try {
+      config = JSON.parse(readFileSync(configPath, "utf8"));
+    } catch {}
+  }
+
+  if (!config.plugin) config.plugin = [];
+  if (!Array.isArray(config.plugin)) config.plugin = [config.plugin];
+  
+  // OpenCode auto-loads local plugins from .opencode/plugins/* but registering it is safe
+  const hasPlugin = config.plugin.some((p: any) => 
+    p === "dev-mem" || (Array.isArray(p) && p[0] === "dev-mem") ||
+    p === "./.opencode/plugins/dev-mem.ts" || (Array.isArray(p) && p[0] === "./.opencode/plugins/dev-mem.ts")
+  );
+
+  if (!hasPlugin) {
+    config.plugin.push("./.opencode/plugins/dev-mem.ts");
+  }
+
+  writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+}
+
 function installHooks(cwd: string) {
   const claudePresent = existsSync(join(cwd, ".claude"));
   const codexPresent = existsSync(join(cwd, ".codex"));
   const cursorPresent = existsSync(join(cwd, ".cursor"));
+  const opencodePresent = existsSync(join(cwd, ".opencode")) || existsSync(join(cwd, "opencode.json"));
 
   const installedAgents: string[] = [];
 
   // Default to claude-code if none found, else install for present agents.
-  if (claudePresent || (!codexPresent && !cursorPresent)) {
+  if (claudePresent || (!codexPresent && !cursorPresent && !opencodePresent)) {
     installClaudeCodeHooks(cwd);
     installedAgents.push("claude-code");
   }
@@ -239,8 +337,34 @@ function installHooks(cwd: string) {
     installedAgents.push("cursor");
   }
 
+  if (opencodePresent) {
+    installOpenCodeHooks(cwd);
+    installedAgents.push("opencode");
+  }
+
   ensureLocalDataDir(cwd);
   return installedAgents;
+}
+
+function uninstallOpenCodeHooks(cwd: string) {
+  const opencodeDir = join(cwd, ".opencode");
+  const configPath = join(opencodeDir, "opencode.json");
+
+  if (existsSync(configPath)) {
+    try {
+      const config = JSON.parse(readFileSync(configPath, "utf8"));
+      if (Array.isArray(config.plugin)) {
+        config.plugin = config.plugin.filter((p: any) => {
+          const name = Array.isArray(p) ? p[0] : p;
+          return name !== "dev-mem" && !name.includes("dev-mem.ts");
+        });
+        writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+      }
+    } catch {}
+  }
+
+  const pluginPath = join(opencodeDir, "plugins", "dev-mem.ts");
+  if (existsSync(pluginPath)) rmSync(pluginPath);
 }
 
 function uninstallCodexHooks(cwd: string) {
@@ -347,6 +471,11 @@ function uninstallHooks(cwd: string, purge: boolean) {
   // Cursor
   if (existsSync(join(cwd, ".cursor"))) {
     uninstallCursorHooks(cwd);
+  }
+
+  // OpenCode
+  if (existsSync(join(cwd, ".opencode")) || existsSync(join(cwd, "opencode.json"))) {
+    uninstallOpenCodeHooks(cwd);
   }
 
   if (purge) {

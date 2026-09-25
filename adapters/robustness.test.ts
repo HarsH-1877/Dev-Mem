@@ -15,7 +15,7 @@ function tempProject(): string {
   return mkdtempSync(join(tmpdir(), "dev-mem-robustness-"));
 }
 
-function invoke(adapter: "claude-code" | "codex" | "cursor", payload: string, cwd: string) {
+function invoke(adapter: "claude-code" | "codex" | "cursor" | "opencode", payload: string, cwd: string) {
   return spawnSync(process.execPath, [join(projectRoot, "dist", "adapters", adapter, "hook.js")], {
     cwd,
     input: payload,
@@ -40,6 +40,7 @@ describe("adapter robustness", () => {
     ["claude-code", "SessionStart"],
     ["codex", "SessionStart"],
     ["cursor", "sessionStart"],
+    ["opencode", "chat.message"],
   ] as const)("%s ignores truncated JSON and wrong base fields without crashing", (adapter, event) => {
     const dir = tempProject();
     try {

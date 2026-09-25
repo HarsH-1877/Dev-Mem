@@ -33,6 +33,7 @@ Dev-Mem detects which agent directories exist and wires hooks accordingly:
 | `.claude/` present (or nothing found) | Claude Code hooks into `.claude/settings.json` and `.claude/hooks/` |
 | `.codex/` present | Codex hooks into `.codex/hooks.json` and `.codex/hooks/` |
 | `.cursor/` present | Cursor hooks into `.cursor/hooks.json` and `.cursor/hooks/` |
+| `.opencode/` or `opencode.json` present | OpenCode plugin into `.opencode/plugins/dev-mem.ts` and `opencode.json` |
 
 If multiple agent directories exist, hooks are installed for all of them.
 
@@ -257,7 +258,7 @@ Each item includes confidence and recency so the agent can weight trust appropri
 
 ## Known limitations
 
-**Cursor: no reliable session-end flush.** Cursor's `cursor-agent` CLI does not reliably fire a session-end event when the headless process exits. Dev-Mem compensates with the N-event checkpoint (extraction fires every 10 completed tool calls by default), but if a session ends before reaching that threshold, knowledge from that session is not extracted until the next checkpoint or until you run `dev-mem wrap`. The `dev-mem wrap cursor-agent <args>` approach is the cleanest workaround.
+**Cursor and OpenCode: no reliable session-end flush.** Cursor's `cursor-agent` CLI and OpenCode do not reliably fire a session-end event when the headless process exits. Dev-Mem compensates with turn-based checkpoints (extraction fires every 10 tool calls for Cursor, and on `session.idle` for OpenCode), but if a session ends abruptly, knowledge from that session is not extracted until the next checkpoint or until you run `dev-mem wrap`. The `dev-mem wrap <command> <args>` approach is the cleanest workaround.
 
 **No automatic repair of corrupted local state.** If `.dev-mem/graph.sqlite` or `.dev-mem/events.jsonl` becomes corrupted (e.g. due to a crash mid-write or a full disk), Dev-Mem logs the failure and no-ops rather than attempting repair. To recover: delete the `.dev-mem/` directory and run `npx dev-mem install` again. You will lose accumulated graph state. There is no automatic backup.
 

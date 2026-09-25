@@ -21,7 +21,7 @@ This spec is written to unblock starting the project, not to lock in every detai
 
 ## 1. Problem Statement
 
-AI coding agents (Claude Code, Codex, Cursor, Gemini CLI, etc.) lose all higher-level development knowledge between sessions and between tools. Git and the filesystem preserve *what the code currently is*. They do not preserve:
+AI coding agents (Claude Code, Codex, Cursor, OpenCode, Gemini CLI, etc.) lose all higher-level development knowledge between sessions and between tools. Git and the filesystem preserve *what the code currently is*. They do not preserve:
 
 - Why an architectural decision was made
 - What approaches were already tried and failed, and why
@@ -102,7 +102,7 @@ These constraints override any individual feature idea. If a feature conflicts w
 3. **Deterministic capture first, LLM second.** Anything that can be captured from git/filesystem/tool-call events without an LLM call must be. LLM calls are reserved for batched knowledge *extraction*, not raw event logging.
 4. **Local-first, no server.** All data lives in the user's own repo (`.dev-mem/`). No hosted backend, no telemetry, no external service dependency for core functionality.
 5. **Evidence is mandatory, symbol-level grounding is not (yet).** Every knowledge item must cite at least a commit/diff/file. Tree-sitter/AST symbol-level grounding is explicitly deferred — see §10, Non-Goals for V1.
-6. **Provider-neutral.** Claude Code, Codex, and Cursor (in that build order) are first-class, not "Claude Code plus adapters bolted on later."
+6. **Provider-neutral.** Claude Code, Codex, Cursor, and OpenCode are first-class, not "Claude Code plus adapters bolted on later."
 
 
 
@@ -202,8 +202,8 @@ Agent activity
 
 ### 7.2 Extraction layer (LLM, batched — not per-event)
 
-- Triggered at session end (Claude Code/Codex), or after N accumulated tool-calls (Cursor), configurable via `.dev-mem/config.yml`.
-- *Note on Cursor*: Cursor's CLI (`cursor-agent`) does not reliably fire a `SessionEnd` event when the headless process exits, and its hook schema uses a flat array with `camelCase` event names (unlike Claude Code/Codex's nested `PascalCase` schema). To compensate for the missing `SessionEnd`, the Cursor adapter relies on the N-accumulated-events checkpoint trigger evaluated at the end of each turn (`stop`).
+- Triggered at session end (Claude Code/Codex), after N accumulated tool-calls (Cursor), or at turn-based idle boundaries (OpenCode).
+- *Note on Cursor and OpenCode*: Neither CLI agent reliably fires a `SessionEnd` event when the headless process exits. To compensate, the Cursor adapter relies on the N-accumulated-events checkpoint trigger evaluated at the end of each turn (`stop`), while the OpenCode adapter relies on the turn-based `session.idle` event.
 - Single batched LLM pass over the session's deterministic log → proposes typed nodes with evidence pointers
 - Extraction is the *only* place an LLM call is allowed in the capture path
 
@@ -324,7 +324,7 @@ Adapter interface (per agent):
   onSessionEnd(transcript) → trigger batched extraction
 ```
 
-Build order: **Claude Code hooks first** (SessionStart, PostToolUse, Stop, SessionEnd) → prove the loop end-to-end → **Codex adapter** → **Cursor adapter**. Each adapter should require no changes to the core service — only wiring.
+Build order: **Claude Code hooks first** (SessionStart, PostToolUse, Stop, SessionEnd) → prove the loop end-to-end → **Codex adapter** → **Cursor adapter** → **OpenCode adapter**. Each adapter should require no changes to the core service — only wiring.
 
 *(Note: at least one other project —* `difflore-cli`*, a Rust tool — uses a similar adapter-trait-per-client pattern across Claude Code, Cursor, Zed, Gemini CLI, and Windsurf. This is treated as validation that the pattern is sound, not as a reason to change approach — but worth being aware of as the competitive landscape keeps moving.)*
 
@@ -369,7 +369,7 @@ This result was verified against the actual shipped adaptive default, not a plac
 
 **Goal: does this work across different agents, not just across sessions of the same agent?**
 
-- Codex and Cursor adapters added behind the same core service
+- Codex, Cursor, and OpenCode adapters added behind the same core service
 - Full lifecycle including `verified` and `superseded` states, with explicit `supersedes`/`contradicts` edges
 - Graph-proximity retrieval signal fully implemented (real dependency graph between files, not approximation)
 - Eval harness re-run in cross-agent mode (agent A works, agent B picks up) — this is where the "reduce redundant discovery across agents" claim gets actually tested
@@ -455,6 +455,7 @@ dev-mem/
     claude-code/
     codex/              # V2
     cursor/             # V2
+    opencode/           # V2
   eval/
     harness/
     sample-repo/

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveProvider } from "./index.js";
 import { createOpenAIProvider } from "./openai.js";
+import { createGeminiProvider } from "./gemini.js";
 
 describe("LLM Provider Resolution", () => {
   it("returns null when no API keys are available", () => {
@@ -60,4 +61,17 @@ describe("OpenAI Provider", () => {
     expect(typeof provider.complete).toBe("function");
   });
 });
+
+describe("Gemini Provider", () => {
+  it("creates a provider with the correct name", () => {
+    const provider = createGeminiProvider("test-key");
+    expect(provider.name).toBe("gemini");
+  });
+
+  it("has a complete method", () => {
+    const provider = createGeminiProvider("test-key");
+    expect(typeof provider.complete).toBe("function");
+  });
+});
+
 

@@ -6,3 +6,4 @@ dist/
 .cursor/
 e2e-repo/
 test-*/
+.superpowers/

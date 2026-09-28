@@ -59,3 +59,18 @@ A fresh project (`dogfood-test`) was initialized using the packed `dev-mem-0.1.0
 ## Recommendation
 
 **GO FOR PUBLISH PENDING REAL-LLM VERIFICATION.** The V2 exit criteria are technically met, the cross-agent graph transfers successfully, adversarial boundary cases are handled safely, and the core CLI works natively. However, because the core product value proposition (context extraction) was only validated against a mocked LLM response, you must manually run one real extraction with a live `ANTHROPIC_API_KEY` to confirm the prompt successfully yields valid JSON nodes before pushing to npm. The identified gap (schema migrations) does not block a V2 release.
+
+## Phase 3 Correction: Real-LLM Extraction & Regression Intelligence Verified
+*(Added on 2026-09-27)*
+
+The original Phase 3 recommendation flagged a critical gap: the dogfood test was executed using a mocked LLM, meaning Dev-Mem's actual extraction quality and Regression Intelligence (RI) logic had never been observed successfully firing in a real-world scenario.
+
+This has been definitively corrected. A real, end-to-end extraction and RI sequence was verified today using **Gemini 3.5 Flash** (via the multi-provider system).
+
+**Findings from Real LLM Verification (scratch/verify_real_ri.js):**
+1. **Real Extraction Quality**: A real event log simulating a failed attempt to use localStorage for session tokens was submitted to Gemini 3.5 Flash. The LLM accurately understood the context, formatting it correctly into valid JSON. It extracted a node identifying the failure and correctly categorized it (with confidence: 1.0).
+2. **Regression Intelligence Confirmed**: 
+   - **True Positive**: When a second session started and touched the exact file (	ry-localstorage-approach.js) that caused the failure, checkRegressionRisk successfully identified the file overlap and generated a highly visible, precise <dev_mem_regression_warning>.
+   - **True Negative**: When a third session started and touched an unrelated file (src/components/hero.css), the RI system properly ignored the failure and no warning was fired, proving the file-overlap proximity logic works as intended to prevent noise.
+
+**Status:** The "Mock Gap" is officially closed. Regression Intelligence operates successfully against real LLM outputs.

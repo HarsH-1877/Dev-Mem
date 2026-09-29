@@ -1,5 +1,4 @@
 <div align="center">
-
 # Dev-Mem
 
 **Persistent local knowledge store for AI coding agents**

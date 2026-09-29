@@ -1,8 +1,20 @@
+<div align="center">
+
 # Dev-Mem
+
+**Persistent local knowledge store for AI coding agents**
 
 [![npm version](https://img.shields.io/npm/v/dev-memo.svg?color=blue)](https://www.npmjs.com/package/dev-memo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org)
+
+<p align="center">
+  <i>Survives session restarts and agent switches across Claude Code, Cursor, Codex, and OpenCode.</i>
+</p>
+
+</div>
+
+---
 
 Dev-Mem gives AI coding agents (Claude Code, Codex, Cursor, OpenCode) a persistent local knowledge store that survives session restarts and agent switches. It records decisions, failed approaches, constraints, and discoveries your agent makes while coding, and injects the relevant ones at the start of each new session — so the next session doesn't re-investigate what the last one already figured out.
 

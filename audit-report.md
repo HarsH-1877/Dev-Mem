@@ -74,3 +74,13 @@ This has been definitively corrected. A real, end-to-end extraction and RI seque
    - **True Negative**: When a third session started and touched an unrelated file (src/components/hero.css), the RI system properly ignored the failure and no warning was fired, proving the file-overlap proximity logic works as intended to prevent noise.
 
 **Status:** The "Mock Gap" is officially closed. Regression Intelligence operates successfully against real LLM outputs.
+
+### Follow-up Verification (Tightened Edge Cases)
+*(Added on 2026-09-29)*
+Following the initial real-LLM validation, two specific rigor checks were re-run:
+
+1. **Commit SHA Capture**: The initial test yielded a null ( 000...) SHA. A tightened end-to-end test using the actual SessionStart shipped hook within a properly initialized git repository was executed. **Result**: The capture layer correctly invoked git rev-parse HEAD and the LLM successfully mapped it. The extracted node recorded a real SHA (cd0367a94ceacbb3ccf9a026f915a886d17c0052), proving the capture mechanism functions properly in reality.
+2. **Regression Intelligence Boundary Limitations**: The RI true-positive was previously tested via a direct internal function call (checkRegressionRisk). This was redone strictly through the compiled product surface (dist/adapters/claude-code/hook.js), sending simulated JSON payloads.
+    * **True Positive (100% overlap)**: Calling PostToolUse with 	ool_name: "Edit" and ile_path: "try-localstorage-approach.js" successfully injected the warning via stdout.
+    * **Scope Limitation (Conceptual Overlap)**: Sending a payload touching src/session-storage.js (conceptually related to the original failure, but a different filename) **DID NOT FIRE** the warning. 
+    * **Conclusion**: Regression Intelligence matching is strictly limited to exact file path intersections. It does not perform semantic/conceptual matching of related files. This is a real product surface limitation that restricts RI's effectiveness to regressions that touch identical files.

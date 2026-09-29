@@ -1,5 +1,9 @@
 # Dev-Mem
 
+[![npm version](https://img.shields.io/npm/v/@harsh_1718/dev-mem.svg?color=blue)](https://www.npmjs.com/package/@harsh_1718/dev-mem)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org)
+
 Dev-Mem gives AI coding agents (Claude Code, Codex, Cursor, OpenCode) a persistent local knowledge store that survives session restarts and agent switches. It records decisions, failed approaches, constraints, and discoveries your agent makes while coding, and injects the relevant ones at the start of each new session — so the next session doesn't re-investigate what the last one already figured out.
 
 Everything stays on your machine. No server, no network dependency beyond your existing LLM API key.
@@ -22,9 +26,10 @@ Everything stays on your machine. No server, no network dependency beyond your e
 
 Run this once per project, from the project root:
 
+```bash
+npx @harsh_1718/dev-mem install
 ```
-npx dev-mem install
-```
+*(Or install globally: `npm install -g @harsh_1718/dev-mem`)*
 
 Dev-Mem detects which agent directories exist and wires hooks accordingly:
 

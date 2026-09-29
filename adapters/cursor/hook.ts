@@ -39,7 +39,7 @@ async function triggerExtractionIfThresholdMet(projectRoot: string, sessionId: s
       console.error(`[dev-mem/cursor] Skipping checkpoint without a prior SessionStart for ${sessionId}`);
       return;
     }
-    const events = log.getEvents().filter(e => e.session_id === sessionId && e.type === "tool_call" && (e as any).exit_code !== -1);
+    const events = log.getEvents().filter((e): e is typeof e & { exit_code: number } => e.session_id === sessionId && e.type === "tool_call" && ('exit_code' in e) && e.exit_code !== -1);
     const threshold = getExtractionEventThreshold(projectRoot);
 
     // If we just hit a multiple of N (and N > 0), trigger the extraction spawn

@@ -1,6 +1,6 @@
 # Dev-Mem
 
-Dev-Mem gives AI coding agents (Claude Code, Codex, Cursor) a persistent local knowledge store that survives session restarts and agent switches. It records decisions, failed approaches, constraints, and discoveries your agent makes while coding, and injects the relevant ones at the start of each new session — so the next session doesn't re-investigate what the last one already figured out.
+Dev-Mem gives AI coding agents (Claude Code, Codex, Cursor, OpenCode) a persistent local knowledge store that survives session restarts and agent switches. It records decisions, failed approaches, constraints, and discoveries your agent makes while coding, and injects the relevant ones at the start of each new session — so the next session doesn't re-investigate what the last one already figured out.
 
 Everything stays on your machine. No server, no network dependency beyond your existing LLM API key.
 

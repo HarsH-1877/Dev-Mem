@@ -4,9 +4,9 @@
 
 **Persistent local knowledge store for AI coding agents**
 
-[![npm version](https://img.shields.io/npm/v/dev-memo.svg?color=blue)](https://www.npmjs.com/package/dev-memo)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org)
+[![npm version](https://img.shields.io/npm/v/dev-memo?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/dev-memo)
+[![License: MIT](https://img.shields.io/badge/License-MIT-1f6feb?style=for-the-badge&logo=open-source-initiative&logoColor=white)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/Node.js-22+-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 
 <p align="center">
   <i>Survives session restarts and agent switches across Claude Code, Cursor, Codex, and OpenCode.</i>

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - README & Documentation Polish
+
+### Changed
+- Updated `README.md` to properly reference the scoped `@harsh_1718/dev-mem` package name on npm.
+- Refined installation instructions to prioritize global installation, ensuring all subsequent `dev-mem` CLI commands work flawlessly out of the box.
+
 ## [0.1.0] - Initial Release
 
 ### Added

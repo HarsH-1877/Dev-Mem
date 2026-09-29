@@ -24,12 +24,18 @@ Everything stays on your machine. No server, no network dependency beyond your e
 
 ## Install
 
-Run this once per project, from the project root:
+Install Dev-Mem globally to make the `dev-mem` command available everywhere:
 
 ```bash
-npx @harsh_1718/dev-mem install
+npm install -g @harsh_1718/dev-mem
 ```
-*(Or install globally: `npm install -g @harsh_1718/dev-mem`)*
+
+Then, run this once per project from the project root to wire the agent hooks:
+
+```bash
+dev-mem install
+```
+*(Or, if you prefer not to install globally, you can prefix all commands in this guide with `npx @harsh_1718/dev-mem`)*
 
 Dev-Mem detects which agent directories exist and wires hooks accordingly:
 

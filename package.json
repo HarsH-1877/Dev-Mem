@@ -1,6 +1,6 @@
 {
   "name": "@harsh_1718/dev-mem",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared, verified development state for AI coding agents — preserves decisions, failed approaches, and discoveries across sessions and agent switches",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 # Dev-Mem
 
-[![npm version](https://img.shields.io/npm/v/@harsh_1718/dev-mem.svg?color=blue)](https://www.npmjs.com/package/@harsh_1718/dev-mem)
+[![npm version](https://img.shields.io/npm/v/dev-memo.svg?color=blue)](https://www.npmjs.com/package/dev-memo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org)
 
@@ -24,18 +24,18 @@ Everything stays on your machine. No server, no network dependency beyond your e
 
 ## Install
 
-Install Dev-Mem globally to make the `dev-mem` command available everywhere:
+Install Dev-Mem globally to make the `dev-memo` command available everywhere:
 
 ```bash
-npm install -g @harsh_1718/dev-mem
+npm install -g dev-memo
 ```
 
 Then, run this once per project from the project root to wire the agent hooks:
 
 ```bash
-dev-mem install
+dev-memo install
 ```
-*(Or, if you prefer not to install globally, you can prefix all commands in this guide with `npx @harsh_1718/dev-mem`)*
+*(Or, if you prefer not to install globally, you can prefix all commands in this guide with `npx dev-memo`)*
 
 Dev-Mem detects which agent directories exist and wires hooks accordingly:
 
@@ -51,33 +51,33 @@ If multiple agent directories exist, hooks are installed for all of them.
 **Example output — Claude Code only:**
 
 ```
-dev-mem hooks installed (agents: claude-code)
+dev-memo hooks installed (agents: claude-code)
 ```
 
 **Example output — with Cursor detected:**
 
 ```
-dev-mem hooks installed (agents: claude-code, cursor)
+dev-memo hooks installed (agents: claude-code, cursor)
 
 [Notice for Cursor]: Cursor CLI lacks a reliable SessionEnd event.
 Dev-Mem uses an N-accumulated-events trigger (default 10) instead.
-For a perfect flush when exiting, run your agent via: dev-mem wrap cursor-agent <args>
+For a perfect flush when exiting, run your agent via: dev-memo wrap cursor-agent <args>
 ```
 
 Dev-Mem also creates `.dev-mem/` at the project root (gitignored by default) and adds `.dev-mem/` to `.gitignore` if it isn't already there.
 
-**Reinstalling:** running `npx dev-mem install` again is safe — it won't duplicate hooks if they're already present.
+**Reinstalling:** running `npx dev-memo install` again is safe — it won't duplicate hooks if they're already present.
 
 ---
 
 ## CLI commands
 
-### `dev-mem status`
+### `dev-memo status`
 
 Shows the current state of the local knowledge graph.
 
 ```
-dev-mem status
+dev-memo status
 ```
 
 Example output:
@@ -102,30 +102,30 @@ If no `.dev-mem/graph.sqlite` exists yet (before the first extraction completes)
 
 ---
 
-### `dev-mem uninstall`
+### `dev-memo uninstall`
 
 Removes all Dev-Mem hooks from detected agent configurations. Leaves `.dev-mem/` data intact.
 
 ```
-dev-mem uninstall
+dev-memo uninstall
 ```
 
 To remove hooks **and** delete all stored data:
 
 ```
-dev-mem uninstall --purge
+dev-memo uninstall --purge
 ```
 
 `--purge` deletes the entire `.dev-mem/` directory. This is not reversible unless you have a backup.
 
 ---
 
-### `dev-mem wrap <command> [args...]`
+### `dev-memo wrap <command> [args...]`
 
 Runs a command and flushes any remaining captured events through extraction when it exits. Primarily useful for Cursor, which doesn't fire a reliable `SessionEnd` event.
 
 ```
-dev-mem wrap cursor-agent --headless
+dev-memo wrap cursor-agent --headless
 ```
 
 Without `wrap`, Cursor's extraction fires every 10 tool calls (configurable). With `wrap`, extraction also runs on clean exit, regardless of whether the threshold was hit.
@@ -133,29 +133,29 @@ Without `wrap`, Cursor's extraction fires every 10 tool calls (configurable). Wi
 Example output on exit:
 
 ```
-[dev-mem] Wrapping complete. Flushing remaining events for session sess_abc123...
+[dev-memo] Wrapping complete. Flushing remaining events for session sess_abc123...
 ```
 
 ---
 
-### `dev-mem extract <session-id>`
+### `dev-memo extract <session-id>`
 
 Manually triggers extraction for a session ID. Normally called automatically by the hooks — only useful if a hook failed to fire or you're debugging.
 
 ```
-dev-mem extract sess_abc123
+dev-memo extract sess_abc123
 ```
 
 If extraction is already running or has already completed for that session, it prints `Extraction skipped` and exits 0.
 
 ---
 
-### `dev-mem query "<text>"`
+### `dev-memo query "<text>"`
 
 Manually runs retrieval for a given task description and prints the context a session would receive. Useful for debugging what's in the graph or checking that extraction captured something correctly.
 
 ```
-dev-mem query "add authentication to the API"
+dev-memo query "add authentication to the API"
 ```
 
 Example output:
@@ -178,15 +178,15 @@ Uses the same adaptive budget and relevance scoring as the live SessionStart hoo
 
 ---
 
-### `dev-mem inspect <node-id>`
+### `dev-memo inspect <node-id>`
 
 Prints the full detail of a single knowledge node — all fields, evidence, lifecycle history, and any edges connecting it to other nodes.
 
 ```
-dev-mem inspect <uuid>
+dev-memo inspect <uuid>
 ```
 
-Get node IDs from `dev-mem status` (lists counts by type) or from `dev-mem query` output (each result includes the evidence commit; run query first to find candidates). Example output:
+Get node IDs from `dev-memo status` (lists counts by type) or from `dev-memo query` output (each result includes the evidence commit; run query first to find candidates). Example output:
 
 ```
 id:              3f2a1b4c-...
@@ -269,9 +269,9 @@ Each item includes confidence and recency so the agent can weight trust appropri
 
 ## Known limitations
 
-**Cursor and OpenCode: no reliable session-end flush.** Cursor's `cursor-agent` CLI and OpenCode do not reliably fire a session-end event when the headless process exits. Dev-Mem compensates with turn-based checkpoints (extraction fires every 10 tool calls for Cursor, and on `session.idle` for OpenCode), but if a session ends abruptly, knowledge from that session is not extracted until the next checkpoint or until you run `dev-mem wrap`. The `dev-mem wrap <command> <args>` approach is the cleanest workaround.
+**Cursor and OpenCode: no reliable session-end flush.** Cursor's `cursor-agent` CLI and OpenCode do not reliably fire a session-end event when the headless process exits. Dev-Mem compensates with turn-based checkpoints (extraction fires every 10 tool calls for Cursor, and on `session.idle` for OpenCode), but if a session ends abruptly, knowledge from that session is not extracted until the next checkpoint or until you run `dev-memo wrap`. The `dev-memo wrap <command> <args>` approach is the cleanest workaround.
 
-**No automatic repair of corrupted local state.** If `.dev-mem/graph.sqlite` or `.dev-mem/events.jsonl` becomes corrupted (e.g. due to a crash mid-write or a full disk), Dev-Mem logs the failure and no-ops rather than attempting repair. To recover: delete the `.dev-mem/` directory and run `npx dev-mem install` again. You will lose accumulated graph state. There is no automatic backup.
+**No automatic repair of corrupted local state.** If `.dev-mem/graph.sqlite` or `.dev-mem/events.jsonl` becomes corrupted (e.g. due to a crash mid-write or a full disk), Dev-Mem logs the failure and no-ops rather than attempting repair. To recover: delete the `.dev-mem/` directory and run `npx dev-memo install` again. You will lose accumulated graph state. There is no automatic backup.
 
 **No symbol-level grounding.** Knowledge nodes are grounded to file paths and commit SHAs, not to specific functions or classes. If a referenced file changes substantially but isn't deleted, Dev-Mem won't detect that a node has gone stale. Staleness detection is currently existence-only: a node is marked stale when all its cited files are deleted, not when their contents change significantly.
 
@@ -294,3 +294,5 @@ For the full design — node types, edge types, lifecycle states, evidence schem
 ## License
 
 MIT
+
+

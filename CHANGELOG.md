@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - Package Rebrand
+
+### Changed
+- Rebranded CLI package to `dev-memo` to resolve npm naming collisions and provide a cleaner, global un-scoped package name.
+- Renamed the CLI executable from `dev-mem` to `dev-memo`. (Local data remains safely in the `.dev-mem/` directory).
+
 ## [0.1.1] - README & Documentation Polish
 
 ### Changed

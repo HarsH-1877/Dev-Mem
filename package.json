@@ -1,11 +1,11 @@
 {
-  "name": "@harsh_1718/dev-mem",
-  "version": "0.1.1",
+  "name": "dev-memo",
+  "version": "0.2.0",
   "description": "Shared, verified development state for AI coding agents — preserves decisions, failed approaches, and discoveries across sessions and agent switches",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "dev-mem": "dist/cli/index.js"
+    "dev-memo": "dist/cli/index.js"
   },
   "exports": {
     ".": "./dist/core/index.js",

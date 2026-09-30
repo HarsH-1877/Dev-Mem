@@ -119,7 +119,7 @@ describe("dev-mem query", () => {
   it("returns usage error when no argument is given", async () => {
     const result = await runCli(["query"]);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("Usage: dev-mem query");
+    expect(result.stderr).toContain("Usage: dev-memo query");
   });
 });
 
@@ -238,6 +238,7 @@ describe("dev-mem inspect", () => {
   it("returns usage error when no argument is given", async () => {
     const result = await runCli(["inspect"]);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("Usage: dev-mem inspect");
+    expect(result.stderr).toContain("Usage: dev-memo inspect");
   });
 });
+

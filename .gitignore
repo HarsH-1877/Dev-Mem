@@ -7,3 +7,5 @@ dist/
 e2e-repo/
 test-*/
 .superpowers/
+
+test-sandbox/

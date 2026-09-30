@@ -146,14 +146,14 @@ Dev-Mem creates a `.dev-mem/` directory at the project root (sibling to `.claude
 ### 4.1 High-Level Data Flow
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
+┌─────────────────────────────────────────────────────────────────────┐
 │                         AGENT SESSION                               │
-│                                                                      │
-│  ┌──────────┐    ┌──────────────┐    ┌──────────┐    ┌──────────┐  │
-│  │ Session  │───▶│  Tool Calls  │───▶│  Agent   │───▶│ Session  │  │
-│  │  Start   │    │  (Write/     │    │  Stop    │    │   End    │  │
-│  │          │    │   Edit/Cmd)  │    │          │    │          │  │
-│  └────┬─────┘    └──────┬───────┘    └────┬─────┘    └────┬─────┘  │
+│                                                                     │
+│  ┌──────────┐    ┌──────────────┐    ┌──────────┐    ┌──────────┐   │
+│  │ Session  │───▶│  Tool Calls  │───▶│  Agent   │───▶│ Session │  │
+│  │  Start   │    │  (Write/     │    │  Stop    │    │   End    │   │
+│  │          │    │   Edit/Cmd)  │    │          │    │          │   │
+│  └────┬─────┘    └──────┬───────┘    └────┬─────┘    └────┬─────┘   │
 │       │                 │                 │               │         │
 └───────┼─────────────────┼─────────────────┼───────────────┼─────────┘
         │                 │                 │               │
@@ -162,38 +162,38 @@ Dev-Mem creates a `.dev-mem/` directory at the project root (sibling to `.claude
 │                    DEV-MEM HOOK LAYER                             │
 │                                                                   │
 │  SessionStart:          PostToolUse:       Stop:       SessionEnd:│
-│  ┌─────────────────┐   ┌──────────────┐  ┌────────┐  ┌────────┐ │
-│  │ 1. Retrieve     │   │ 1. Log event │  │ Git    │  │ Trigger│ │
-│  │    context      │   │ 2. Regression│  │ snap   │  │ async  │ │
-│  │ 2. Regression   │   │    check on  │  │        │  │ LLM    │ │
-│  │    pre-check    │   │    file edits│  │        │  │extract │ │
-│  │ 3. Inject into  │   │              │  │        │  │        │ │
-│  │    agent prompt │   │              │  │        │  │        │ │
-│  └─────────────────┘   └──────────────┘  └────────┘  └────────┘ │
+│  ┌─────────────────┐   ┌──────────────┐  ┌────────┐  ┌────────┐   │
+│  │ 1. Retrieve     │   │ 1. Log event │  │ Git    │  │ Trigger│   │
+│  │    context      │   │ 2. Regression│  │ snap   │  │ async  │   │
+│  │ 2. Regression   │   │    check on  │  │        │  │ LLM    │   │
+│  │    pre-check    │   │    file edits│  │        │  │extract │   │ 
+│  │ 3. Inject into  │   │              │  │        │  │        │   │
+│  │    agent prompt │   │              │  │        │  │        │   │
+│  └─────────────────┘   └──────────────┘  └────────┘  └────────┘   │
 │                                                                   │
 └───────────────────────────────────────────────────────────────────┘
         │                 │                 │               │
         ▼                 ▼                 ▼               ▼
-┌───────────────────────────────────────────────────────────────────┐
-│                       CORE ENGINE                                 │
-│                                                                   │
-│  ┌────────────┐  ┌─────────────┐  ┌──────────┐  ┌────────────┐  │
-│  │ Retrieval  │  │ Deterministic│  │Regression│  │ Extraction │  │
-│  │ (ranking + │  │  Capture    │  │Intelligence│ │ (batched   │  │
-│  │  knapsack) │  │ (zero LLM) │  │ (active   │  │  LLM call) │  │
-│  │            │  │             │  │  blocking)│  │            │  │
-│  └──────┬─────┘  └──────┬──────┘  └─────┬────┘  └──────┬─────┘  │
-│         │               │               │              │         │
-│         ▼               ▼               ▼              ▼         │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │              .dev-mem/graph.sqlite                        │    │
-│  │              (Knowledge Graph)                            │    │
-│  │  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐  │    │
-│  │  │   Nodes     │  │    Edges     │  │   Lifecycle     │  │    │
-│  │  │ (6 types)   │  │ (5 types)    │  │   History       │  │    │
-│  │  └─────────────┘  └──────────────┘  └────────────────┘  │    │
-│  └──────────────────────────────────────────────────────────┘    │
-└───────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                       CORE ENGINE                                  │
+│                                                                    │
+│  ┌────────────┐  ┌──────────────┐  ┌────────────┐  ┌────────────┐  │
+│  │ Retrieval  │  │ Deterministic│  │Regression  │  │ Extraction │  │
+│  │ (ranking + │  │  Capture     │  │Intelligence│  │ (batched   │  │
+│  │  knapsack) │  │ (zero LLM)   │  │ (active    │  │  LLM call) │  │
+│  │            │  │              │  │  blocking) │  │            │  │
+│  └──────┬─────┘  └──────┬───────┘  └─────┬──────┘  └──────┬─────┘  │
+│         │               │               │              │           │
+│         ▼               ▼               ▼              ▼           │
+│  ┌──────────────────────────────────────────────────────────┐      │
+│  │              .dev-mem/graph.sqlite                       │      │
+│  │              (Knowledge Graph)                           │      │
+│  │  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐   │      │
+│  │  │    Nodes    │  │    Edges     │  │   Lifecycle    │   │      │
+│  │  │  (6 types)  │  │  (5 types)   │  │    History     │   │      │
+│  │  └─────────────┘  └──────────────┘  └────────────────┘   │      │
+│  └──────────────────────────────────────────────────────────┘      │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 4.2 Core Processing Loop
@@ -223,9 +223,9 @@ All agents share the same `.dev-mem/graph.sqlite` in the project root. When Agen
                                  │
                                  ▼
                     ┌─────────────────────────┐
-                    │  .dev-mem/graph.sqlite   │
-                    │  (shared knowledge       │
-                    │   graph)                 │
+                    │  .dev-mem/graph.sqlite  │
+                    │  (shared knowledge      │
+                    │   graph)                │
                     └─────────────────────────┘
 ```
 

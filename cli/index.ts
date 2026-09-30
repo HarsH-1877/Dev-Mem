@@ -313,16 +313,27 @@ function installOpenCodeHooks(cwd: string) {
   writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
 }
 
-function installHooks(cwd: string) {
-  const claudePresent = existsSync(join(cwd, ".claude"));
-  const codexPresent = existsSync(join(cwd, ".codex"));
-  const cursorPresent = existsSync(join(cwd, ".cursor"));
-  const opencodePresent = existsSync(join(cwd, ".opencode")) || existsSync(join(cwd, "opencode.json"));
-
+function installHooks(cwd: string, requestedAgents: string[]) {
   const installedAgents: string[] = [];
+  const validAgents = ["claude-code", "codex", "cursor", "opencode"];
 
-  // Default to claude-code if none found, else install for present agents.
-  if (claudePresent || (!codexPresent && !cursorPresent && !opencodePresent)) {
+  const explicitAgents = requestedAgents.map(a => a.toLowerCase());
+  for (const agent of explicitAgents) {
+    if (!validAgents.includes(agent)) {
+      throw new Error(`Invalid agent: ${agent}. Supported agents: ${validAgents.join(", ")}`);
+    }
+  }
+
+  const explicit = explicitAgents.length > 0;
+
+  const claudePresent = explicit ? explicitAgents.includes("claude-code") : existsSync(join(cwd, ".claude"));
+  const codexPresent = explicit ? explicitAgents.includes("codex") : existsSync(join(cwd, ".codex"));
+  const cursorPresent = explicit ? explicitAgents.includes("cursor") : existsSync(join(cwd, ".cursor"));
+  const opencodePresent = explicit ? explicitAgents.includes("opencode") : (existsSync(join(cwd, ".opencode")) || existsSync(join(cwd, "opencode.json")));
+
+  // Default to claude-code if none found and no explicit agents requested.
+  const defaultedToClaude = !explicit && !claudePresent && !codexPresent && !cursorPresent && !opencodePresent;
+  if (claudePresent || defaultedToClaude) {
     installClaudeCodeHooks(cwd);
     installedAgents.push("claude-code");
   }
@@ -343,7 +354,7 @@ function installHooks(cwd: string) {
   }
 
   ensureLocalDataDir(cwd);
-  return installedAgents;
+  return { installedAgents, defaultedToClaude };
 }
 
 function uninstallOpenCodeHooks(cwd: string) {
@@ -532,11 +543,11 @@ async function extractOnce(cwd: string, sessionId: string): Promise<{ skipped: b
   try {
     release = acquireExtractionLock(cwd, sessionId);
   } catch (error) {
-    console.error(`[dev-mem] Unable to prepare extraction lock for ${sessionId}: ${(error as Error).message}`);
+    console.error(`[dev-memo] Unable to prepare extraction lock for ${sessionId}: ${(error as Error).message}`);
     return { skipped: true, success: false };
   }
   if (!release) {
-    console.error(`[dev-mem] Extraction already running or complete for session ${sessionId}; skipping duplicate trigger`);
+    console.error(`[dev-memo] Extraction already running or complete for session ${sessionId}; skipping duplicate trigger`);
     return { skipped: true, success: true };
   }
   try {
@@ -555,7 +566,7 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
     return {
       exitCode: 1,
       stdout: "",
-      stderr: `Usage: dev-mem <${COMMANDS.join("|")}>\n`,
+      stderr: `Usage: dev-memo <${COMMANDS.join("|")}>\n`,
     };
   }
 
@@ -563,7 +574,7 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
     return {
       exitCode: 1,
       stdout: "",
-      stderr: `Unknown command: ${command}\nUsage: dev-mem <${COMMANDS.join("|")}>\n`,
+      stderr: `Unknown command: ${command}\nUsage: dev-memo <${COMMANDS.join("|")}>\n`,
     };
   }
 
@@ -571,10 +582,13 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
 
   try {
     if (command === "install") {
-      const agents = installHooks(cwd);
-      let out = `dev-mem hooks installed (agents: ${agents.join(", ")})\n`;
+      const { installedAgents: agents, defaultedToClaude } = installHooks(cwd, args);
+      let out = `dev-memo hooks installed (agents: ${agents.join(", ")})\n`;
+      if (defaultedToClaude) {
+        out += `\n[Notice]: No agent configuration folders were detected, so dev-memo defaulted to claude-code.\nIf you are using a different agent, specify it explicitly:\n  dev-memo install codex\n  dev-memo install cursor\n`;
+      }
       if (agents.includes("cursor")) {
-        out += `\n[Notice for Cursor]: Cursor CLI lacks a reliable SessionEnd event.\nDev-Mem uses an N-accumulated-events trigger (default 10) instead.\nFor a perfect flush when exiting, run your agent via: dev-mem wrap cursor-agent <args>\n`;
+        out += `\n[Notice for Cursor]: Cursor CLI lacks a reliable SessionEnd event.\nDev-Memo uses an N-accumulated-events trigger (default 10) instead.\nFor a perfect flush when exiting, run your agent via: dev-memo wrap cursor-agent <args>\n`;
       }
       return { exitCode: 0, stdout: out, stderr: "" };
     } else if (command === "status") {
@@ -583,17 +597,17 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
     } else if (command === "uninstall") {
       const purge = args.includes("--purge");
       uninstallHooks(cwd, purge);
-      return { exitCode: 0, stdout: "dev-mem hooks uninstalled\n", stderr: "" };
+      return { exitCode: 0, stdout: "dev-memo hooks uninstalled\n", stderr: "" };
     } else if (command === "extract") {
       const sessionId = args[0];
       if (!sessionId) {
-        return { exitCode: 1, stdout: "", stderr: "Usage: dev-mem extract <sessionId>\n" };
+        return { exitCode: 1, stdout: "", stderr: "Usage: dev-memo extract <sessionId>\n" };
       }
       const result = await extractOnce(cwd, sessionId);
       return { exitCode: result.success ? 0 : 1, stdout: result.skipped ? "Extraction skipped\n" : "Extraction complete\n", stderr: "" };
     } else if (command === "wrap") {
       if (args.length === 0) {
-        return { exitCode: 1, stdout: "", stderr: "Usage: dev-mem wrap <command> [args...]\n" };
+        return { exitCode: 1, stdout: "", stderr: "Usage: dev-memo wrap <command> [args...]\n" };
       }
       return new Promise((resolve) => {
         import("node:child_process").then(({ spawn }) => {
@@ -607,12 +621,12 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
               if (events.length > 0) {
                 const lastSessionId = events[events.length - 1].session_id;
                 if (lastSessionId) {
-                  process.stdout.write(`\n[dev-mem] Wrapping complete. Flushing remaining events for session ${lastSessionId}...\n`);
+                  process.stdout.write(`\n[dev-memo] Wrapping complete. Flushing remaining events for session ${lastSessionId}...\n`);
                   await extractOnce(cwd, lastSessionId);
                 }
               }
             } catch (e: any) {
-              process.stderr.write(`[dev-mem] Wrap flush error: ${e.message}\n`);
+              process.stderr.write(`[dev-memo] Wrap flush error: ${e.message}\n`);
             }
             resolve({ exitCode: code ?? 0, stdout: "", stderr: "" });
           });
@@ -621,7 +635,7 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
     } else if (command === "query") {
       const text = args[0];
       if (!text) {
-        return { exitCode: 1, stdout: "", stderr: "Usage: dev-mem query \"<task description>\"\n" };
+        return { exitCode: 1, stdout: "", stderr: "Usage: dev-memo query \"<task description>\"\n" };
       }
       const nodes = retrieveContext({ projectRoot: cwd, currentTask: text });
       const out = generateInjectionString(nodes);
@@ -633,7 +647,7 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
     } else if (command === "inspect") {
       const nodeId = args[0];
       if (!nodeId) {
-        return { exitCode: 1, stdout: "", stderr: "Usage: dev-mem inspect <node-id>\n" };
+        return { exitCode: 1, stdout: "", stderr: "Usage: dev-memo inspect <node-id>\n" };
       }
       const store = new GraphStore({ projectRoot: cwd });
       let out: string;
@@ -700,7 +714,8 @@ const isDirectRun =
   typeof process.argv[1] === "string" &&
   (process.argv[1].endsWith("cli/index.js") ||
     process.argv[1].endsWith("cli\\index.js") ||
-    process.argv[1].endsWith("dev-mem"));
+    process.argv[1].endsWith("dev-mem") ||
+    process.argv[1].endsWith("dev-memo"));
 
 if (isDirectRun) {
   runCli(process.argv.slice(2)).then((result) => {
@@ -716,3 +731,4 @@ if (isDirectRun) {
     process.exit(1);
   });
 }
+

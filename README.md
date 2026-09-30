@@ -49,14 +49,20 @@ dev-memo install
 ```
 *(Or, if you prefer not to install globally, you can prefix all commands in this guide with `npx dev-memo`)*
 
-Dev-Mem detects which agent directories exist and wires hooks accordingly:
+Dev-Mem automatically detects which agent directories exist in your project. However, since agents like Codex and Cursor do not auto-create their directories in every repository by default, **you can explicitly specify your agent**:
 
-| What it detects | What it installs |
+```bash
+dev-memo install codex
+# or
+dev-memo install cursor
+```
+
+| Agent Requested / Detected | What it installs |
 |---|---|
-| `.claude/` present (or nothing found) | Claude Code hooks into `.claude/settings.json` and `.claude/hooks/` |
-| `.codex/` present | Codex hooks into `.codex/hooks.json` and `.codex/hooks/` |
-| `.cursor/` present | Cursor hooks into `.cursor/hooks.json` and `.cursor/hooks/` |
-| `.opencode/` or `opencode.json` present | OpenCode plugin into `.opencode/plugins/dev-mem.ts` and `opencode.json` |
+| `claude-code` (or nothing found) | Claude Code hooks into `.claude/settings.json` and `.claude/hooks/` |
+| `codex` | Codex hooks into `.codex/hooks.json` and `.codex/hooks/` |
+| `cursor` | Cursor hooks into `.cursor/hooks.json` and `.cursor/hooks/` |
+| `opencode` | OpenCode plugin into `.opencode/plugins/dev-mem.ts` and `opencode.json` |
 
 If multiple agent directories exist, hooks are installed for all of them.
 

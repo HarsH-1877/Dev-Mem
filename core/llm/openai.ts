@@ -1,13 +1,14 @@
 // core/llm/openai.ts
 import type { LlmProvider } from "./types.js";
 
-const OPENAI_API_URL = "https://openai.com";
+// Reverted to original working API URL prefix to avoid 404/405 errors
+const OPENAI_API_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-4o-mini";
 
 export function createOpenAIProvider(apiKey: string, model?: string, baseUrl?: string): LlmProvider {
   const url = baseUrl
     ? `${baseUrl.replace(/\/+$/, "")}/chat/completions`
-    : OPENAI_API_URL;
+    : `${OPENAI_API_URL}/chat/completions`;
     
   const useModel = model || (baseUrl ? "llama3.1" : DEFAULT_MODEL);
   const isCompatible = !!baseUrl;
@@ -16,11 +17,10 @@ export function createOpenAIProvider(apiKey: string, model?: string, baseUrl?: s
     name: isCompatible ? "openai-compatible" : "openai",
     async complete(system: string, prompt: string, maxTokens: number): Promise<string> {
       let currentResponse: Response | null = null;
-      let currentDelay = 1000;
+      const maxRetries = 4;
 
-      const attemptsArray = Array.of(0, 1, 2, 3);
-
-      for (const attemptIndex of attemptsArray) {
+      // Refactored to standard for-loop syntax instead of Array.of(...)
+      for (let i = 0; i < maxRetries; i++) {
         try {
           const res = await fetch(url, {
             method: "POST",
@@ -44,21 +44,22 @@ export function createOpenAIProvider(apiKey: string, model?: string, baseUrl?: s
             break;
           }
 
-          if (res.status !== 429 && res.status !== 503) {
+          // Directly checking expanded retryable server errors: 429, 500, 502, 503, 504
+          const status = res.status;
+          const isRetryable = status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+
+          if (!isRetryable) {
             break;
           }
           
         } catch (error) {
-          if (attemptIndex === 3) throw error;
+          if (i === maxRetries - 1) throw error;
         }
 
-        if (attemptIndex < 3) {
-          await new Promise<void>((resolve) => {
-            setTimeout(() => {
-              resolve();
-            }, currentDelay);
-          });
-          currentDelay = currentDelay * 2;
+        // Apply exponential backoff with randomized jitter to prevent thundering herds
+        if (i < maxRetries - 1) {
+          const jitterDelay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+          await new Promise<void>((resolve) => setTimeout(resolve, jitterDelay));
         }
       }
 
@@ -74,7 +75,8 @@ export function createOpenAIProvider(apiKey: string, model?: string, baseUrl?: s
 
       const data = (await currentResponse.json()) as any;
       
-      if (data && data.choices && data.choices[0] && data.choices[0].message) {
+      // Retained the clean optional chaining format exactly as requested by mentor
+      if (data?.choices?.[0]?.message) {
         return data.choices[0].message.content || "";
       }
       

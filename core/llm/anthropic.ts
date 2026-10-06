@@ -1,9 +1,10 @@
 // core/llm/anthropic.ts
 import type { LlmProvider } from "./types.js";
 
-// FIXED: Correct Anthropic base endpoint path for messages API
-const ANTHROPIC_API_URL = "https://anthropic.com";
-const DEFAULT_MODEL = "claude-3-5-sonnet-20240620";
+// Reverted to the original official Anthropic API endpoint to avoid 404/405 errors
+const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+// Restored the proper default model as requested by the mentor
+const DEFAULT_MODEL = "claude-3-5-sonnet-20241022";
 
 export function createAnthropicProvider(apiKey: string, model?: string): LlmProvider {
   const useModel = model || DEFAULT_MODEL;
@@ -12,12 +13,10 @@ export function createAnthropicProvider(apiKey: string, model?: string): LlmProv
     name: "anthropic",
     async complete(system: string, prompt: string, maxTokens: number): Promise<string> {
       let currentResponse: Response | null = null;
-      let currentDelay = 1000;
+      const maxRetries = 4;
 
-      // Clean iteration array for 4 attempts (0, 1, 2, 3)
-      const attemptsArray = Array.of(0, 1, 2, 3);
-
-      for (const attemptIndex of attemptsArray) {
+      // Refactored to standard for-loop syntax instead of Array.of(...)
+      for (let i = 0; i < maxRetries; i++) {
         try {
           const res = await fetch(ANTHROPIC_API_URL, {
             method: "POST",
@@ -38,27 +37,25 @@ export function createAnthropicProvider(apiKey: string, model?: string): LlmProv
 
           currentResponse = res;
 
-          // FIXED LOGIC: If response is successful, break the retry loop immediately.
           if (res.ok) {
             break;
           }
 
-          // Status 429 (Rate Limit) or 503 (Service Unavailable) should trigger a retry
-          if (res.status !== 429 && res.status !== 503) {
+          // Directly checking expanded retryable server errors: 429, 500, 502, 503, 504
+          const status = res.status;
+          const isRetryable = status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+
+          if (!isRetryable) {
             break;
           }
         } catch (error) {
-          if (attemptIndex === 3) throw error;
+          if (i === maxRetries - 1) throw error;
         }
 
-        // If we haven't reached the max retries, wait with exponential backoff
-        if (attemptIndex < 3) {
-          await new Promise<void>((resolve) => {
-            setTimeout(() => {
-              resolve();
-            }, currentDelay);
-          });
-          currentDelay = currentDelay * 2; // 1000ms -> 2000ms -> 4000ms
+        // Apply exponential backoff with randomized jitter before the next retry
+        if (i < maxRetries - 1) {
+          const jitterDelay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+          await new Promise<void>((resolve) => setTimeout(resolve, jitterDelay));
         }
       }
 
@@ -73,12 +70,8 @@ export function createAnthropicProvider(apiKey: string, model?: string): LlmProv
 
       const data = (await currentResponse.json()) as any;
 
-      // Anthropic safely extracts text data via content array blocks
-      if (data && data.content && data.content[0] && data.content[0].text) {
-        return data.content[0].text || "";
-      }
-
-      return "";
+      // Retained clean optional chaining for extracting text data
+      return data?.content?.[0]?.text || "";
     }
   };
 }

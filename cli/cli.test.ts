@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -242,3 +242,44 @@ describe("dev-mem inspect", () => {
   });
 });
 
+describe("dev-memo top-level flags and failure reporting", () => {
+  let testDir: string;
+  let savedCwd: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), "dev-mem-cli-flags-"));
+    initGitRepo(testDir);
+    savedCwd = process.cwd();
+    process.chdir(testDir);
+  });
+
+  afterEach(() => {
+    process.chdir(savedCwd);
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it("prints the package version for --version and -v", async () => {
+    const pkg = JSON.parse(readFileSync(join(savedCwd, "package.json"), "utf8"));
+    for (const flag of ["--version", "-v"]) {
+      const result = await runCli([flag]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe(pkg.version);
+    }
+  });
+
+  it("prints usage with exit code 0 for --help and -h", async () => {
+    for (const flag of ["--help", "-h"]) {
+      const result = await runCli([flag]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Usage: dev-memo");
+      expect(result.stdout).toContain("install");
+    }
+  });
+
+  it("does not report success when extraction fails", async () => {
+    const result = await runCli(["extract", "no-such-session"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).not.toContain("Extraction complete");
+    expect(result.stderr).toContain("Extraction failed");
+  });
+});

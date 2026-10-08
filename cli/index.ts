@@ -559,8 +559,50 @@ async function extractOnce(cwd: string, sessionId: string): Promise<{ skipped: b
   }
 }
 
+/** Reads the version from package.json (works from both cli/ source and dist/cli/ build). */
+function readPackageVersion(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ["../package.json", "../../package.json"]) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(here, rel), "utf8"));
+      if (pkg?.name === "dev-memo" && typeof pkg.version === "string") return pkg.version;
+    } catch {
+      // try next candidate
+    }
+  }
+  return "unknown";
+}
+
+function helpText(): string {
+  return [
+    `Usage: dev-memo <${COMMANDS.join("|")}>`,
+    "",
+    "Commands:",
+    "  install [agent...]   Install hooks (claude-code, codex, cursor, opencode); auto-detects if omitted",
+    "  status               Show graph and capture status",
+    "  query \"<task>\"       Show context relevant to a task",
+    "  inspect <node-id>    Show full details of a graph node",
+    "  extract <sessionId>  Run knowledge extraction for a session",
+    "  wrap <command...>    Run a command, then flush captured events",
+    "  uninstall [--purge]  Remove hooks (--purge also deletes .dev-mem/)",
+    "",
+    "Options:",
+    "  -v, --version        Print version",
+    "  -h, --help           Print this help",
+    "",
+  ].join("\n");
+}
+
 export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const [command, ...args] = argv;
+
+  if (command === "--version" || command === "-v") {
+    return { exitCode: 0, stdout: readPackageVersion() + "\n", stderr: "" };
+  }
+
+  if (command === "--help" || command === "-h") {
+    return { exitCode: 0, stdout: helpText(), stderr: "" };
+  }
 
   if (!command) {
     return {
@@ -604,7 +646,13 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
         return { exitCode: 1, stdout: "", stderr: "Usage: dev-memo extract <sessionId>\n" };
       }
       const result = await extractOnce(cwd, sessionId);
-      return { exitCode: result.success ? 0 : 1, stdout: result.skipped ? "Extraction skipped\n" : "Extraction complete\n", stderr: "" };
+      if (result.skipped) {
+        return { exitCode: result.success ? 0 : 1, stdout: "Extraction skipped\n", stderr: "" };
+      }
+      if (!result.success) {
+        return { exitCode: 1, stdout: "", stderr: `Extraction failed for session ${sessionId} (see messages above)\n` };
+      }
+      return { exitCode: 0, stdout: "Extraction complete\n", stderr: "" };
     } else if (command === "wrap") {
       if (args.length === 0) {
         return { exitCode: 1, stdout: "", stderr: "Usage: dev-memo wrap <command> [args...]\n" };

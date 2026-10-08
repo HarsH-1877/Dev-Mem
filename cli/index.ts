@@ -24,47 +24,76 @@ import { GraphStore } from "../core/graph/index.js";
 import { acquireExtractionLock, markExtractionComplete } from "../core/extraction-lock.js";
 import { retrieveContext, generateInjectionString } from "../core/retrieval/index.js";
 
-function getHookScriptCode(eventName: string): string {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  const distDir = join(currentDir, "..").replace(/\\/g, "/");
+function getDynamicDistDirCode(): string {
+  return `import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { execSync } from "node:child_process";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
-  // Installed hooks delegate to the bundled adapter so they automatically
-  // pick up any fixes shipped in a later version of dev-mem.
-  return `import { pathToFileURL } from "node:url";
-await import(pathToFileURL("${distDir}/adapters/claude-code/hook.js").href);
+let distDir = "";
+try {
+  const pathFile = join(process.cwd(), ".dev-mem", "install-path.txt");
+  if (existsSync(pathFile)) {
+    const cached = readFileSync(pathFile, "utf8").trim();
+    if (existsSync(join(cached, "core"))) distDir = cached;
+  }
+} catch (e) {}
+
+if (!distDir) {
+  try {
+    const resolved = import.meta.resolve("dev-memo/package.json");
+    if (resolved) distDir = join(fileURLToPath(resolved), "..", "dist");
+  } catch (e) {}
+}
+
+if (!distDir) {
+  try {
+    const root = execSync("npm root -g", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const globalPath = join(root, "dev-memo", "dist");
+    if (existsSync(globalPath)) {
+      distDir = globalPath;
+      try { writeFileSync(join(process.cwd(), ".dev-mem", "install-path.txt"), distDir, "utf8"); } catch(e) {}
+    }
+  } catch (e) {}
+}
+`;
+}
+
+function getHookScriptCode(eventName: string): string {
+  return `${getDynamicDistDirCode()}
+if (distDir) {
+  await import(pathToFileURL(join(distDir, "adapters/claude-code/hook.js")).href);
+}
 `;
 }
 
 function getCodexHookScriptCode(_eventName: string): string {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  const distDir = join(currentDir, "..").replace(/\\/g, "/");
-
-  return `import { pathToFileURL } from "node:url";
-await import(pathToFileURL("${distDir}/adapters/codex/hook.js").href);
+  return `${getDynamicDistDirCode()}
+if (distDir) {
+  await import(pathToFileURL(join(distDir, "adapters/codex/hook.js")).href);
+}
 `;
 }
 
 function getCursorHookScriptCode(_eventName: string): string {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  const distDir = join(currentDir, "..").replace(/\\/g, "/");
-
-  return `import { pathToFileURL } from "node:url";
-await import(pathToFileURL("${distDir}/adapters/cursor/hook.js").href);
+  return `${getDynamicDistDirCode()}
+if (distDir) {
+  await import(pathToFileURL(join(distDir, "adapters/cursor/hook.js")).href);
+}
 `;
 }
 
 function getOpenCodeHookScriptCode(): string {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  const distDir = join(currentDir, "..").replace(/\\/g, "/");
-
   return `import { spawnSync } from "node:child_process";
-import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";
+${getDynamicDistDirCode()}
 
 export default async function DevMemPlugin(input, options) {
+  if (!distDir) return input;
   const currentDir = dirname(fileURLToPath(import.meta.url));
   const projectRoot = join(currentDir, "../.."); // up from .opencode/plugins/
-  const hookPath = fileURLToPath(pathToFileURL("${distDir}/adapters/opencode/hook.js"));
+  const hookPath = fileURLToPath(pathToFileURL(join(distDir, "adapters/opencode/hook.js")));
 
   function runHookSync(eventName, payload) {
     try {
@@ -354,6 +383,12 @@ function installHooks(cwd: string, requestedAgents: string[]) {
   }
 
   ensureLocalDataDir(cwd);
+  try {
+    const currentDir = dirname(fileURLToPath(import.meta.url));
+    const distDir = join(currentDir, "..").replace(/\\/g, "/");
+    writeFileSync(join(cwd, ".dev-mem", "install-path.txt"), distDir, "utf8");
+  } catch (e) {}
+
   return { installedAgents, defaultedToClaude };
 }
 

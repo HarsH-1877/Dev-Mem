@@ -694,7 +694,8 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
       }
       return new Promise((resolve) => {
         import("node:child_process").then(({ spawn }) => {
-          const child = spawn(args[0], args.slice(1), { stdio: "inherit", shell: true });
+          const isWin = process.platform === "win32";
+          const child = spawn(args[0], args.slice(1), { stdio: "inherit", shell: isWin });
           
           child.on("close", async (code) => {
             try {

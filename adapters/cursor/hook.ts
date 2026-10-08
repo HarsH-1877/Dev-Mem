@@ -16,6 +16,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DeterministicCapture } from "../../core/capture/index.js";
+import { retryPendingExtractions } from "../../core/extraction-retry.js";
 import { EventLog } from "../../core/capture/log.js";
 import { getExtractionEventThreshold } from "../../core/checkpoint.js";
 import { numberFor, parseHookPayload, recordFor, stringFor } from "../../core/hook-safety.js";
@@ -76,6 +77,8 @@ async function main() {
 
       case "sessionStart": {
         capture.startSession();
+        // Re-trigger extraction for earlier sessions that failed or never ran (bounded, never throws).
+        retryPendingExtractions(projectRoot, payload.session_id);
         const gitSnap = capture.captureGit();
 
         const { retrieveContext, generateInjectionString } = await import("../../core/retrieval/index.js");

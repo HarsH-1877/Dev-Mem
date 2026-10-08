@@ -9,6 +9,13 @@ function statePath(projectRoot: string, sessionId: string, suffix: string): stri
   return join(dir, `${encodeURIComponent(sessionId)}.${suffix}`);
 }
 
+export { statePath as extractionStatePath };
+
+/** True once a session has been successfully extracted. */
+export function isExtractionComplete(projectRoot: string, sessionId: string): boolean {
+  return existsSync(statePath(projectRoot, sessionId, "done"));
+}
+
 /** Returns false when another hook already completed or is extracting this session. */
 export function acquireExtractionLock(projectRoot: string, sessionId: string): (() => void) | null {
   const done = statePath(projectRoot, sessionId, "done");

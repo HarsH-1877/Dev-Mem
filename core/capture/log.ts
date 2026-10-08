@@ -10,17 +10,22 @@ import type { CaptureEvent } from "./events.js";
 export class EventLog {
   private readonly events: CaptureEvent[] = [];
   private readonly persistPath?: string;
+  /** True when the file ends mid-line (e.g. process killed mid-write). */
+  private needsLeadingNewline = false;
 
   constructor(options: { persistPath?: string } = {}) {
     this.persistPath = options.persistPath;
     if (this.persistPath && existsSync(this.persistPath)) {
-      const text = readFileSync(this.persistPath, "utf8").trim();
+      const raw = readFileSync(this.persistPath, "utf8");
+      this.needsLeadingNewline = raw.length > 0 && !raw.endsWith("\n");
+      const text = raw.trim();
       if (text !== "") {
         for (const [index, line] of text.split("\n").entries()) {
           try {
             this.events.push(JSON.parse(line) as CaptureEvent);
           } catch (error) {
-            throw new Error(`Corrupt event log at line ${index + 1}: ${(error as Error).message}`);
+            // One bad line must not permanently disable capture. Skip it, but say so.
+            console.error(`[dev-mem] Skipping corrupt event log line ${index + 1}: ${(error as Error).message}`);
           }
         }
       }
@@ -31,7 +36,9 @@ export class EventLog {
     this.events.push(event);
     if (this.persistPath) {
       mkdirSync(dirname(this.persistPath), { recursive: true });
-      appendFileSync(this.persistPath, `${JSON.stringify(event)}\n`, "utf8");
+      const prefix = this.needsLeadingNewline ? "\n" : "";
+      appendFileSync(this.persistPath, `${prefix}${JSON.stringify(event)}\n`, "utf8");
+      this.needsLeadingNewline = false;
     }
     return event;
   }

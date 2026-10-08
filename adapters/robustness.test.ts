@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -73,7 +73,10 @@ describe("adapter robustness", () => {
       writeFileSync(join(dir, ".dev-mem", "events.jsonl"), "{not json}\n");
       const corrupted = invoke("claude-code", JSON.stringify({ session_id: "broken", cwd: dir, hook_event_name: "SessionStart" }), dir);
       expect(corrupted.status).toBe(0);
-      expect(corrupted.stderr).toContain("Hook error");
+      expect(corrupted.stderr).toContain("Skipping corrupt event log line 1");
+      // Capture must still record the session despite the bad line. (A later git error is
+      // expected here: the temp dir is not a git repo.)
+      expect(readFileSync(join(dir, ".dev-mem", "events.jsonl"), "utf8")).toContain('"session_start"');
 
       rmSync(join(dir, ".dev-mem", "events.jsonl"));
       mkdirSync(join(dir, ".dev-mem", "events.jsonl")); // appendFileSync now fails like an unavailable full target
@@ -143,12 +146,29 @@ describe("adapter robustness", () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it("reports a corrupt event log rather than silently accepting it", () => {
+  it("skips corrupt event log lines with a warning and keeps valid events", () => {
     const dir = tempProject();
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const path = join(dir, "events.jsonl");
-      writeFileSync(path, "not-json\n");
-      expect(() => new EventLog({ persistPath: path })).toThrow("Corrupt event log at line 1");
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+      const good = JSON.stringify({ id: "1", type: "session_start", session_id: "s", agent: "claude-code", timestamp: "2026-01-01T00:00:00.000Z" });
+      writeFileSync(path, `not-json\n${good}\n`);
+      const log = new EventLog({ persistPath: path });
+      expect(log.getEvents()).toHaveLength(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("Skipping corrupt event log line 1"));
+    } finally { warn.mockRestore(); rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("does not merge the next event into a torn final line", () => {
+    const dir = tempProject();
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const path = join(dir, "events.jsonl");
+      writeFileSync(path, '{"id":"torn","type":"sess'); // killed mid-write, no trailing newline
+      const log = new EventLog({ persistPath: path });
+      log.append({ id: "2", type: "session_start", session_id: "s", agent: "claude-code", timestamp: "2026-01-01T00:00:00.000Z" } as any);
+      const reloaded = new EventLog({ persistPath: path });
+      expect(reloaded.getEvents().map((e) => e.id)).toEqual(["2"]);
+    } finally { warn.mockRestore(); rmSync(dir, { recursive: true, force: true }); }
   });
 });

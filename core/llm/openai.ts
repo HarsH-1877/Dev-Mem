@@ -1,7 +1,8 @@
 // core/llm/openai.ts
 import type { LlmProvider } from "./types.js";
+import { fetchWithRetry } from "./retry.js";
 
-// Reverted to original working API URL prefix to avoid 404/405 errors
+
 const OPENAI_API_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-4o-mini";
 
@@ -16,71 +17,33 @@ export function createOpenAIProvider(apiKey: string, model?: string, baseUrl?: s
   return {
     name: isCompatible ? "openai-compatible" : "openai",
     async complete(system: string, prompt: string, maxTokens: number): Promise<string> {
-      let currentResponse: Response | null = null;
-      const maxRetries = 4;
+      const options = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: useModel,
+          max_tokens: maxTokens,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: prompt }
+          ]
+        })
+      };
 
-      // Refactored to standard for-loop syntax instead of Array.of(...)
-      for (let i = 0; i < maxRetries; i++) {
-        try {
-          const res = await fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-              model: useModel,
-              max_tokens: maxTokens,
-              messages: [
-                { role: "system", content: system },
-                { role: "user", content: prompt }
-              ]
-            })
-          });
+      const response = await fetchWithRetry(url, options);
 
-          currentResponse = res;
-
-          if (res.ok) {
-            break;
-          }
-
-          // Directly checking expanded retryable server errors: 429, 500, 502, 503, 504
-          const status = res.status;
-          const isRetryable = status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
-
-          if (!isRetryable) {
-            break;
-          }
-          
-        } catch (error) {
-          if (i === maxRetries - 1) throw error;
-        }
-
-        // Apply exponential backoff with randomized jitter to prevent thundering herds
-        if (i < maxRetries - 1) {
-          const jitterDelay = Math.pow(2, i) * 1000 + Math.random() * 1000;
-          await new Promise<void>((resolve) => setTimeout(resolve, jitterDelay));
-        }
-      }
-
-      if (!currentResponse) {
-        throw new Error("OpenAI API invocation broke down: No response captured.");
-      }
-
-      if (!currentResponse.ok) {
-        const errBody = await currentResponse.text();
+      if (!response.ok) {
+        const errBody = await response.text();
         const label = isCompatible ? "OpenAI-compatible" : "OpenAI";
-        throw new Error(`${label} API error (${currentResponse.status}): ${errBody}`);
+        throw new Error(`${label} API error (${response.status}): ${errBody}`);
       }
 
-      const data = (await currentResponse.json()) as any;
+      const data = (await response.json()) as any;
       
-      // Retained the clean optional chaining format exactly as requested by mentor
-      if (data?.choices?.[0]?.message) {
-        return data.choices[0].message.content || "";
-      }
-      
-      return "";
+      return data?.choices?.[0]?.message?.content || "";
     }
   };
 }

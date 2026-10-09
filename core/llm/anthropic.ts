@@ -1,7 +1,7 @@
 import type { LlmProvider } from "./types.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const DEFAULT_MODEL = "claude-3-5-sonnet-20241022";
+const DEFAULT_MODEL = "claude-3-5-haiku-20241022";
 
 export function createAnthropicProvider(apiKey: string, model?: string): LlmProvider {
   const useModel = model || DEFAULT_MODEL;

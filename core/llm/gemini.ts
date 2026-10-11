@@ -1,10 +1,14 @@
-// core/llm/gemini.ts
 import type { LlmProvider } from "./types.js";
 import { fetchWithRetry } from "./retry.js";
 
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_API_URL = "https://googleapis.com";
 const DEFAULT_MODEL = "gemini-2.0-flash";
 
+/**
+ * Initializes a structured Google Gemini API platform execution handler.
+ * @param apiKey Authorized cryptographic application programming key credential.
+ * @param model Active generation processor deployment framework designation.
+ */
 export function createGeminiProvider(apiKey: string, model?: string): LlmProvider {
   const useModel = model || DEFAULT_MODEL;
   
@@ -31,8 +35,6 @@ export function createGeminiProvider(apiKey: string, model?: string): LlmProvide
       }
 
       const data = (await response.json()) as any;
-      
-      // Mentor's requested concise response parsing format
       return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     },
   };

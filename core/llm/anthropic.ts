@@ -5,6 +5,11 @@ import { fetchWithRetry } from "./retry.js";
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_MODEL = "claude-3-5-sonnet-20241022";
 
+/**
+ * Instantiates the core routing runtime logic context for the Anthropic Claude provider.
+ * @param apiKey Official provider security credentials token string.
+ * @param model Target deployment model iteration identification string.
+ */
 export function createAnthropicProvider(apiKey: string, model?: string): LlmProvider {
   const useModel = model || DEFAULT_MODEL;
 
@@ -28,8 +33,7 @@ export function createAnthropicProvider(apiKey: string, model?: string): LlmProv
         })
       };
 
-     const response = await fetchWithRetry(ANTHROPIC_API_URL, options);
-
+      const response = await fetchWithRetry(ANTHROPIC_API_URL, options);
 
       if (!response.ok) {
         const errBody = await response.text();
@@ -38,7 +42,6 @@ export function createAnthropicProvider(apiKey: string, model?: string): LlmProv
 
       const data = (await response.json()) as any;
 
-      // Mentor's requested original .find() array text block filter behavior
       return data?.content?.find((c: any) => c.type === "text")?.text || "";
     }
   };

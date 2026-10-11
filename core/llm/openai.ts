@@ -2,10 +2,15 @@
 import type { LlmProvider } from "./types.js";
 import { fetchWithRetry } from "./retry.js";
 
-
 const OPENAI_API_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-4o-mini";
 
+/**
+ * Creates an instance of the OpenAI LLM provider context execution pipeline.
+ * @param apiKey Official provider security credentials token string.
+ * @param model Target deployment model iteration identification string.
+ * @param baseUrl Alternative override routing interface string.
+ */
 export function createOpenAIProvider(apiKey: string, model?: string, baseUrl?: string): LlmProvider {
   const url = baseUrl
     ? `${baseUrl.replace(/\/+$/, "")}/chat/completions`

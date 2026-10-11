@@ -1,7 +1,6 @@
 /**
- * Exponential backoff aur jitter ke saath fetch request ko retry karne ke liye helper function.
- * 429 aur 5xx status codes par retry karega, 400/401 par nahi karega.
- * Retry-After header ko bhi honor karta hai.
+ * Implements exponential backoff retry mechanism with randomized jitter.
+ * Handles rate limits (429) and server errors (5xx range) and honors the Retry-After header.
  */
 export async function fetchWithRetry(
   url: string,

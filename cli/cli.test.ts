@@ -6,12 +6,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { GraphStore } from "../core/graph/index.js";
-import { runCli } from "./index.js";
+import { runCli, findStaleHooks } from "./index.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -281,5 +281,32 @@ describe("dev-memo top-level flags and failure reporting", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).not.toContain("Extraction complete");
     expect(result.stderr).toContain("Extraction failed");
+  });
+});
+
+describe("stale hook detection", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "dm-stale-")); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it("flags v1 hooks that embed an absolute path", () => {
+    mkdirSync(join(dir, ".claude", "hooks"), { recursive: true });
+    writeFileSync(join(dir, ".claude", "hooks", "dev-mem-sessionstart.js"),
+      'import { pathToFileURL } from "node:url";\nawait import(pathToFileURL("C:/x/dist/adapters/claude-code/hook.js").href);\n');
+    expect(findStaleHooks(dir)).toEqual([".claude/hooks/dev-mem-sessionstart.js"]);
+  });
+
+  it("does not flag freshly installed hooks", async () => {
+    initGitRepo(dir);
+    await runCli(["install", "claude-code"], { cwd: dir });
+    expect(findStaleHooks(dir)).toEqual([]);
+  });
+
+  it("status prints an upgrade warning when stale hooks exist", async () => {
+    initGitRepo(dir);
+    mkdirSync(join(dir, ".claude", "hooks"), { recursive: true });
+    writeFileSync(join(dir, ".claude", "hooks", "dev-mem-stop.js"), "// old\n");
+    const res = await runCli(["status"], { cwd: dir });
+    expect(res.stdout + res.stderr).toContain("Run `dev-memo install` to upgrade");
   });
 });

@@ -18,12 +18,12 @@ function isCommand(value: string): value is Command {
 
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync, readdirSync } from "node:fs";
 import { ensureLocalDataDir, getEventsLogPath } from "../core/local-data.js";
 import { GraphStore } from "../core/graph/index.js";
 import { acquireExtractionLock, markExtractionComplete } from "../core/extraction-lock.js";
 import { retrieveContext, generateInjectionString } from "../core/retrieval/index.js";
-import { buildResolverSource } from "./hook-resolver.js";
+import { buildResolverSource, HOOK_MARKER } from "./hook-resolver.js";
 
 function adapterHook(adapter: "claude-code" | "codex" | "cursor"): string {
   return `${buildResolverSource()}
@@ -485,6 +485,27 @@ function uninstallHooks(cwd: string, purge: boolean) {
 }
 
 
+export function findStaleHooks(cwd: string): string[] {
+  const locations: Array<[string, RegExp]> = [
+    [".claude/hooks", /^dev-mem-.*\.js$/],
+    [".codex/hooks", /^dev-mem-.*\.js$/],
+    [".cursor/hooks", /^dev-mem-.*\.js$/],
+    [".opencode/plugins", /^dev-mem.*\.js$/],
+  ];
+  const stale: string[] = [];
+  for (const [rel, pattern] of locations) {
+    const dir = join(cwd, rel);
+    if (!existsSync(dir)) continue;
+    for (const name of readdirSync(dir)) {
+      if (!pattern.test(name)) continue;
+      try {
+        if (!readFileSync(join(dir, name), "utf8").includes(HOOK_MARKER)) stale.push(`${rel}/${name}`);
+      } catch {}
+    }
+  }
+  return stale;
+}
+
 function runStatus(cwd: string): string {
   let output = "";
   try {
@@ -520,6 +541,14 @@ function runStatus(cwd: string): string {
   } else {
     output += "\nLast capture: None\n";
   }
+
+  const stale = findStaleHooks(cwd);
+  if (stale.length > 0) {
+    output += `\n⚠ ${stale.length} Dev-Mem hook file(s) use the old format (machine-specific paths):\n`
+      + stale.map((s) => `  - ${s}`).join("\n")
+      + "\nRun `dev-memo install` to upgrade them.\n";
+  }
+
   return output;
 }
 
@@ -580,7 +609,10 @@ function helpText(): string {
   ].join("\n");
 }
 
-export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+export async function runCli(
+  argv: string[],
+  options: { cwd?: string } = {}
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const [command, ...args] = argv;
 
   if (command === "--version" || command === "-v") {
@@ -607,7 +639,7 @@ export async function runCli(argv: string[]): Promise<{ exitCode: number; stdout
     };
   }
 
-  const cwd = process.cwd();
+  const cwd = options.cwd ?? process.cwd();
 
   try {
     if (command === "install") {

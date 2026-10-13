@@ -583,11 +583,15 @@ export async function runDoctor(cwd: string, opts: { live?: boolean } = {}): Pro
   lines.push(stale.length ? `! ${stale.length} stale hook file(s) — run dev-memo install` : "✓ Hooks up to date");
 
   const probeDir = mkdtempSync(join(tmpdir(), "dm-doctor-"));
-  const probe = join(probeDir, "probe.mjs");
-  writeFileSync(probe, `${buildResolverSource()}\nprocess.stdout.write(distDir);\n`);
-  const res = spawnSync(process.execPath, [probe], { cwd, encoding: "utf8", timeout: 5000 });
-  rmSync(probeDir, { recursive: true, force: true });
-  const found = (res.stdout || "").trim();
+  let found = "";
+  try {
+    const probe = join(probeDir, "probe.mjs");
+    writeFileSync(probe, `${buildResolverSource()}\nprocess.stdout.write(distDir);\n`);
+    const res = spawnSync(process.execPath, [probe], { cwd, encoding: "utf8", timeout: 5000 });
+    found = (res.stdout || "").trim();
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true });
+  }
   if (found) lines.push(`✓ dev-memo found at ${found}`); else fail("Hooks cannot locate dev-memo");
 
   const provider = resolveProviderForProject(cwd);
@@ -596,13 +600,19 @@ export async function runDoctor(cwd: string, opts: { live?: boolean } = {}): Pro
   } else {
     lines.push(`✓ LLM provider: ${provider.name}`);
     if (opts.live) {
+      let timer: NodeJS.Timeout;
+      const timeoutPromise = new Promise((_, rej) => {
+        timer = setTimeout(() => rej(new Error("timeout after 15s")), 15000);
+        timer.unref?.();
+      });
       try {
-        await Promise.race([
-          provider.complete("Reply with OK.", "OK", 5),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after 15s")), 15000)),
-        ]);
+        await Promise.race([provider.complete("Reply with OK.", "OK", 5), timeoutPromise]);
         lines.push("✓ LLM reachable");
-      } catch (e) { fail(`LLM call failed: ${(e as Error).message}`); }
+      } catch (e) {
+        fail(`LLM call failed: ${(e as Error).message}`);
+      } finally {
+        clearTimeout(timer!);
+      }
     }
   }
   return { ok, lines };

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { GraphStore } from "../core/graph/index.js";
-import { runCli, findStaleHooks } from "./index.js";
+import { runCli, findStaleHooks, runDoctor } from "./index.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -308,5 +308,47 @@ describe("stale hook detection", () => {
     writeFileSync(join(dir, ".claude", "hooks", "dev-mem-stop.js"), "// old\n");
     const res = await runCli(["status"], { cwd: dir });
     expect(res.stdout + res.stderr).toContain("Run `dev-memo install` to upgrade");
+  });
+});
+
+describe("dev-memo doctor", () => {
+  let dir: string;
+  const saved = { ...process.env };
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "dm-doc-")); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); process.env = { ...saved }; });
+
+  it("fails outside a git repo", async () => {
+    const r = await runDoctor(dir);
+    expect(r.ok).toBe(false);
+    expect(r.lines.join("\n")).toContain("✗ Not a git repository");
+  });
+
+  it("fails when no LLM provider is configured", async () => {
+    initGitRepo(dir);
+    for (const k of ["ANTHROPIC_API_KEY","OPENAI_API_KEY","GEMINI_API_KEY","GOOGLE_API_KEY","DEV_MEM_LLM_BASE_URL","DEV_MEM_LLM_PROVIDER","DEV_MEM_LLM_API_KEY"]) delete process.env[k];
+    const r = await runDoctor(dir);
+    expect(r.ok).toBe(false);
+    expect(r.lines.join("\n")).toContain("✗ No LLM provider configured");
+  });
+
+  it("passes with hooks installed and a provider set", async () => {
+    initGitRepo(dir);
+    process.env.GEMINI_API_KEY = "test-key";
+    process.env.DEV_MEM_DIST_DIR = join(process.cwd(), "dist");
+    await runCli(["install", "claude-code"], { cwd: dir });
+    const r = await runDoctor(dir);
+    expect(r.lines.join("\n")).toContain("✓ LLM provider: gemini");
+    expect(r.lines.join("\n")).toContain("✓ Hooks up to date");
+    expect(r.ok).toBe(true);
+  });
+
+  it("routes doctor command through runCli", async () => {
+    initGitRepo(dir);
+    process.env.GEMINI_API_KEY = "test-key";
+    process.env.DEV_MEM_DIST_DIR = join(process.cwd(), "dist");
+    await runCli(["install", "claude-code"], { cwd: dir });
+    const r = await runCli(["doctor"], { cwd: dir });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("✓ LLM provider: gemini");
   });
 });

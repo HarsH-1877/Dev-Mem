@@ -8,6 +8,7 @@ const COMMANDS = [
   "uninstall",
   "extract",
   "wrap",
+  "doctor",
 ] as const;
 
 type Command = (typeof COMMANDS)[number];
@@ -18,12 +19,15 @@ function isCommand(value: string): value is Command {
 
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync, readdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { execFileSync, spawnSync } from "node:child_process";
 import { ensureLocalDataDir, getEventsLogPath } from "../core/local-data.js";
 import { GraphStore } from "../core/graph/index.js";
 import { acquireExtractionLock, markExtractionComplete } from "../core/extraction-lock.js";
 import { retrieveContext, generateInjectionString } from "../core/retrieval/index.js";
 import { buildResolverSource, HOOK_MARKER } from "./hook-resolver.js";
+import { resolveProviderForProject } from "../core/llm/index.js";
 
 function adapterHook(adapter: "claude-code" | "codex" | "cursor"): string {
   return `${buildResolverSource()}
@@ -552,6 +556,58 @@ function runStatus(cwd: string): string {
   return output;
 }
 
+export async function runDoctor(cwd: string, opts: { live?: boolean } = {}): Promise<{ ok: boolean; lines: string[] }> {
+  const lines: string[] = [];
+  let ok = true;
+  const fail = (m: string) => { ok = false; lines.push(`✗ ${m}`); };
+
+  try {
+    execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, stdio: "ignore" });
+    lines.push("✓ Git repository");
+  } catch { fail("Not a git repository"); }
+
+  const agents = [
+    ["claude-code", ".claude/hooks"], ["codex", ".codex/hooks"],
+    ["cursor", ".cursor/hooks"], ["opencode", ".opencode/plugins"],
+  ].filter(([, rel]) => {
+    try {
+      return existsSync(join(cwd, rel)) &&
+        readdirSync(join(cwd, rel)).some((f) => f.startsWith("dev-mem"));
+    } catch {
+      return false;
+    }
+  }).map(([a]) => a);
+  lines.push(agents.length ? `✓ Hooks: ${agents.join(", ")}` : "! No agent hooks installed — run dev-memo install");
+
+  const stale = findStaleHooks(cwd);
+  lines.push(stale.length ? `! ${stale.length} stale hook file(s) — run dev-memo install` : "✓ Hooks up to date");
+
+  const probeDir = mkdtempSync(join(tmpdir(), "dm-doctor-"));
+  const probe = join(probeDir, "probe.mjs");
+  writeFileSync(probe, `${buildResolverSource()}\nprocess.stdout.write(distDir);\n`);
+  const res = spawnSync(process.execPath, [probe], { cwd, encoding: "utf8", timeout: 5000 });
+  rmSync(probeDir, { recursive: true, force: true });
+  const found = (res.stdout || "").trim();
+  if (found) lines.push(`✓ dev-memo found at ${found}`); else fail("Hooks cannot locate dev-memo");
+
+  const provider = resolveProviderForProject(cwd);
+  if (!provider) {
+    fail("No LLM provider configured");
+  } else {
+    lines.push(`✓ LLM provider: ${provider.name}`);
+    if (opts.live) {
+      try {
+        await Promise.race([
+          provider.complete("Reply with OK.", "OK", 5),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after 15s")), 15000)),
+        ]);
+        lines.push("✓ LLM reachable");
+      } catch (e) { fail(`LLM call failed: ${(e as Error).message}`); }
+    }
+  }
+  return { ok, lines };
+}
+
 import { runExtraction } from "../core/extraction/index.js";
 
 async function extractOnce(cwd: string, sessionId: string): Promise<{ skipped: boolean; success: boolean }> {
@@ -596,6 +652,7 @@ function helpText(): string {
     "Commands:",
     "  install [agent...]   Install hooks (claude-code, codex, cursor, opencode); auto-detects if omitted",
     "  status               Show graph and capture status",
+    "  doctor [--live]      Check git, hooks, install path and LLM configuration",
     "  query \"<task>\"       Show context relevant to a task",
     "  inspect <node-id>    Show full details of a graph node",
     "  extract <sessionId>  Run knowledge extraction for a session",
@@ -655,6 +712,9 @@ export async function runCli(
     } else if (command === "status") {
       const output = runStatus(cwd);
       return { exitCode: 0, stdout: output + "\n", stderr: "" };
+    } else if (command === "doctor") {
+      const r = await runDoctor(cwd, { live: args.includes("--live") });
+      return { stdout: r.lines.join("\n") + "\n", stderr: "", exitCode: r.ok ? 0 : 1 };
     } else if (command === "uninstall") {
       const purge = args.includes("--purge");
       uninstallHooks(cwd, purge);

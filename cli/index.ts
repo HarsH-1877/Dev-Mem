@@ -23,71 +23,23 @@ import { ensureLocalDataDir, getEventsLogPath } from "../core/local-data.js";
 import { GraphStore } from "../core/graph/index.js";
 import { acquireExtractionLock, markExtractionComplete } from "../core/extraction-lock.js";
 import { retrieveContext, generateInjectionString } from "../core/retrieval/index.js";
+import { buildResolverSource } from "./hook-resolver.js";
 
-function getDynamicDistDirCode(): string {
-  return `import { readFileSync, existsSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { execSync } from "node:child_process";
-import { pathToFileURL, fileURLToPath } from "node:url";
-
-let distDir = "";
-try {
-  const pathFile = join(process.cwd(), ".dev-mem", "install-path.txt");
-  if (existsSync(pathFile)) {
-    const cached = readFileSync(pathFile, "utf8").trim();
-    if (existsSync(join(cached, "core"))) distDir = cached;
-  }
-} catch (e) {}
-
-if (!distDir) {
-  try {
-    const resolved = import.meta.resolve("dev-memo/package.json");
-    if (resolved) distDir = join(fileURLToPath(resolved), "..", "dist");
-  } catch (e) {}
-}
-
-if (!distDir) {
-  try {
-    const root = execSync("npm root -g", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    const globalPath = join(root, "dev-memo", "dist");
-    if (existsSync(globalPath)) {
-      distDir = globalPath;
-      try { writeFileSync(join(process.cwd(), ".dev-mem", "install-path.txt"), distDir, "utf8"); } catch(e) {}
-    }
-  } catch (e) {}
-}
-`;
-}
-
-function getHookScriptCode(eventName: string): string {
-  return `${getDynamicDistDirCode()}
+function adapterHook(adapter: "claude-code" | "codex" | "cursor"): string {
+  return `${buildResolverSource()}
 if (distDir) {
-  await import(pathToFileURL(join(distDir, "adapters/claude-code/hook.js")).href);
+  try { await import(pathToFileURL(join(distDir, "adapters", "${adapter}", "hook.js")).href); } catch {}
 }
 `;
 }
 
-function getCodexHookScriptCode(_eventName: string): string {
-  return `${getDynamicDistDirCode()}
-if (distDir) {
-  await import(pathToFileURL(join(distDir, "adapters/codex/hook.js")).href);
-}
-`;
-}
-
-function getCursorHookScriptCode(_eventName: string): string {
-  return `${getDynamicDistDirCode()}
-if (distDir) {
-  await import(pathToFileURL(join(distDir, "adapters/cursor/hook.js")).href);
-}
-`;
-}
+function getHookScriptCode(_eventName: string): string { return adapterHook("claude-code"); }
+function getCodexHookScriptCode(_eventName: string): string { return adapterHook("codex"); }
+function getCursorHookScriptCode(_eventName: string): string { return adapterHook("cursor"); }
 
 function getOpenCodeHookScriptCode(): string {
   return `import { spawnSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { pathToFileURL, fileURLToPath } from "node:url";
-${getDynamicDistDirCode()}
+${buildResolverSource()}
 
 export default async function DevMemPlugin(input, options) {
   if (!distDir) return input;

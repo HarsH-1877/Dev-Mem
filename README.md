@@ -27,9 +27,9 @@ Everything stays on your machine. No server, no network dependency beyond your e
 - Node.js 22+
 - An existing project with at least one of: `.claude/`, `.codex/`, or `.cursor/` already present (or a Claude Code project, which creates `.claude/` automatically)
 - An LLM API key for the extraction step — any ONE of:
-  - `ANTHROPIC_API_KEY` (Claude)
-  - `OPENAI_API_KEY` (GPT-4o / GPT-4o-mini)
-  - `GEMINI_API_KEY` or `GOOGLE_API_KEY` (Gemini)
+  - `ANTHROPIC_API_KEY` (Claude, default: `claude-haiku-4-5`)
+  - `OPENAI_API_KEY` (OpenAI, default: `gpt-5-mini`)
+  - `GEMINI_API_KEY` or `GOOGLE_API_KEY` (Gemini, default: `gemini-3.5-flash`)
   - `DEV_MEM_LLM_BASE_URL` pointed at any OpenAI-compatible endpoint (Ollama, Groq, OpenRouter, LM Studio, DeepSeek) — no API key required for local Ollama
 
 ---
@@ -86,6 +86,10 @@ Dev-Mem also creates `.dev-mem/` at the project root (gitignored by default) and
 
 **Reinstalling:** running `npx dev-memo install` again is safe — it won't duplicate hooks if they're already present.
 
+### Upgrading from 0.2.x
+
+Hook scripts changed format. After upgrading, run `dev-memo install` once in each project. `dev-memo status` warns you if old hooks are still present. Upgraded hooks contain no machine-specific paths and are safe to commit for your whole team.
+
 ---
 
 ## CLI commands
@@ -117,6 +121,18 @@ Last capture: 2026-09-18T14:22:07.031Z
 ```
 
 If no `.dev-mem/graph.sqlite` exists yet (before the first extraction completes), it prints `GraphStore Error: ...` — this is normal before the first session ends.
+
+---
+
+### `dev-memo doctor [--live]`
+
+Checks git repository, hook currency, install-path resolution, and LLM configuration (add `--live` to make a live test call to the configured LLM provider).
+
+```bash
+dev-memo doctor
+# or test LLM connectivity:
+dev-memo doctor --live
+```
 
 ---
 
@@ -238,16 +254,22 @@ Returns exit code 1 with `Node not found: <id>` if the ID doesn't exist.
 
 Create `.dev-mem/config.yml` at the project root to override defaults.
 
-**Currently supported option:**
+**Currently supported options:**
 
 ```yaml
 # Number of completed tool calls in a Cursor session before extraction
 # is triggered automatically. Must be a positive integer.
 # Default: 10. Has no effect on Claude Code or Codex (they use SessionEnd).
 extraction_event_threshold: 10
+
+# Optional LLM overrides (defaults: claude-haiku-4-5, gpt-5-mini, gemini-3.5-flash)
+# llm_provider: anthropic   # "anthropic" | "openai" | "gemini" | "openai-compatible"
+# llm_model: claude-haiku-4-5
+# llm_base_url: http://localhost:11434/v1
+# llm_api_key: sk-...
 ```
 
-This is the only key Dev-Mem reads from `config.yml` right now. The file is optional — if it doesn't exist or the key is missing, the default of 10 is used. An invalid value (non-integer, zero, negative) logs a diagnostic and falls back to 10.
+The file is optional — if it doesn't exist or keys are missing, the defaults are used. LLM provider and model settings can also be configured via environment variables (`DEV_MEM_LLM_PROVIDER`, `DEV_MEM_LLM_MODEL`, `DEV_MEM_LLM_BASE_URL`, `DEV_MEM_LLM_API_KEY`).
 
 Token budget settings are not yet user-configurable through `config.yml`. The retrieval budget is calculated automatically from graph size (`nodeCount × 18`, clamped between 80 and 2000 tokens).
 

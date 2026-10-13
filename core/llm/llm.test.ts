@@ -95,3 +95,16 @@ describe("Config-based provider resolution", () => {
   });
 });
 
+import { DEFAULT_MODEL as ANTHROPIC_DEFAULT } from "./anthropic.js";
+import { DEFAULT_MODEL as GEMINI_DEFAULT } from "./gemini.js";
+import { DEFAULT_MODEL as OPENAI_DEFAULT } from "./openai.js";
+
+describe("Default models", () => {
+  it("uses current cost-efficient defaults", () => {
+    expect(ANTHROPIC_DEFAULT).toBe("claude-haiku-4-5");
+    expect(GEMINI_DEFAULT).toBe("gemini-3.5-flash");
+    expect(OPENAI_DEFAULT).toBe("gpt-5-mini");
+  });
+});
+
+

@@ -2,7 +2,7 @@
 import type { LlmProvider } from "./types.js";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL = "gpt-4o-mini";
+export const DEFAULT_MODEL = "gpt-5-mini";
 
 /**
  * OpenAI and OpenAI-compatible provider (Ollama, Groq, OpenRouter, LM Studio, DeepSeek).

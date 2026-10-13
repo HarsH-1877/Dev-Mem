@@ -19,7 +19,7 @@ export interface ProviderResolutionOptions {
   apiKey?: string;
   /** Force a specific provider: "anthropic" | "openai" | "gemini" | "openai-compatible" */
   provider?: string;
-  /** Model override (e.g. "gpt-4o", "claude-3-5-sonnet-20241022") */
+  /** Model override (e.g. "gpt-5-mini", "claude-haiku-4-5") */
   model?: string;
   /** Base URL for OpenAI-compatible endpoints (e.g. Ollama, Groq) */
   baseUrl?: string;

@@ -494,13 +494,19 @@ export function findStaleHooks(cwd: string): string[] {
     [".claude/hooks", /^dev-mem-.*\.js$/],
     [".codex/hooks", /^dev-mem-.*\.js$/],
     [".cursor/hooks", /^dev-mem-.*\.js$/],
-    [".opencode/plugins", /^dev-mem.*\.js$/],
+    [".opencode/plugins", /^dev-mem.*\.[jt]s$/],
   ];
   const stale: string[] = [];
   for (const [rel, pattern] of locations) {
     const dir = join(cwd, rel);
     if (!existsSync(dir)) continue;
-    for (const name of readdirSync(dir)) {
+    let names: string[];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
       if (!pattern.test(name)) continue;
       try {
         if (!readFileSync(join(dir, name), "utf8").includes(HOOK_MARKER)) stale.push(`${rel}/${name}`);

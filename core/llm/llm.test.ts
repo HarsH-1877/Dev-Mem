@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { resolveProvider, resolveProviderForProject } from "./index.js";
 import { createOpenAIProvider } from "./openai.js";
 import { createGeminiProvider } from "./gemini.js";
+import { DEFAULT_MODEL as ANTHROPIC_DEFAULT } from "./anthropic.js";
+import { DEFAULT_MODEL as GEMINI_DEFAULT } from "./gemini.js";
+import { DEFAULT_MODEL as OPENAI_DEFAULT } from "./openai.js";
 
 describe("LLM Provider Resolution", () => {
   it("returns null when no API keys are available", () => {
@@ -94,10 +97,6 @@ describe("Config-based provider resolution", () => {
     }
   });
 });
-
-import { DEFAULT_MODEL as ANTHROPIC_DEFAULT } from "./anthropic.js";
-import { DEFAULT_MODEL as GEMINI_DEFAULT } from "./gemini.js";
-import { DEFAULT_MODEL as OPENAI_DEFAULT } from "./openai.js";
 
 describe("Default models", () => {
   it("uses current cost-efficient defaults", () => {

@@ -296,6 +296,12 @@ describe("stale hook detection", () => {
     expect(findStaleHooks(dir)).toEqual([".claude/hooks/dev-mem-sessionstart.js"]);
   });
 
+  it("flags v1 OpenCode .ts plugins that lack the hook marker", () => {
+    mkdirSync(join(dir, ".opencode", "plugins"), { recursive: true });
+    writeFileSync(join(dir, ".opencode", "plugins", "dev-mem.ts"), "// old opencode plugin\n");
+    expect(findStaleHooks(dir)).toEqual([".opencode/plugins/dev-mem.ts"]);
+  });
+
   it("does not flag freshly installed hooks", async () => {
     initGitRepo(dir);
     await runCli(["install", "claude-code"], { cwd: dir });

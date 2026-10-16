@@ -4,7 +4,7 @@ import { GraphStore } from "../graph/index.js";
 import type { CaptureEvent, FileTouchEvent, GitSnapshotEvent, ToolCallEvent } from "../capture/events.js";
 import type { CreateNodeInput, KnowledgeNode, NodeType } from "../graph/types.js";
 import { NODE_TYPES } from "../graph/types.js";
-import { checkContradictions, checkStaleness } from "../consistency/index.js";
+import { checkContradictions, checkStaleness, promoteSurvivingNodes } from "../consistency/index.js";
 import { resolveProviderForProject } from "../llm/index.js";
 
 export interface ExtractionOptions {
@@ -113,7 +113,7 @@ export async function runExtraction(options: ExtractionOptions): Promise<Extract
       store.close();
 
       const candidateNodes = allNodes.filter(n =>
-        (n.type === "Decision" || n.type === "Constraint" || n.type === "Convention") &&
+        (n.type === "Decision" || n.type === "Constraint" || n.type === "Convention" || n.type === "OpenIssue") &&
         n.lifecycle_state !== "stale" &&
         n.lifecycle_state !== "superseded"
       );
@@ -144,6 +144,8 @@ Extract nodes strictly belonging to these types (§5.1):
 - "OpenIssue": Unresolved problems, regressions, or follow-ups remaining
 
 If any extracted node directly contradicts an existing active knowledge node listed above, include a contradicts_edges entry.
+If any extracted node replaces or supersedes an older decision/approach, include a supersedes_edges entry.
+If any extracted node resolves an existing OpenIssue, include a resolves_edges entry.
 
 Output strictly a single valid JSON object with the following schema:
 {
@@ -153,6 +155,7 @@ Output strictly a single valid JSON object with the following schema:
       "title": "Concise summary statement",
       "content": "Detailed technical explanation and context",
       "files": ["relative/path/to/file1", ...],
+      "symbols": ["optionalFunctionOrClassName", ...],
       "confidence": 0.0 to 1.0,
       "diff_ref": "optional commit or diff reference",
       "test_ref": "optional test command or path"
@@ -163,6 +166,18 @@ Output strictly a single valid JSON object with the following schema:
       "node_title": "Exact title of the newly extracted node from above",
       "existing_node_id": "ID of the existing node it contradicts",
       "reason": "Short explanation"
+    }
+  ],
+  "supersedes_edges": [
+    {
+      "node_title": "Exact title of the newly extracted node from above",
+      "existing_node_id": "ID of the older node it replaces or resolves"
+    }
+  ],
+  "resolves_edges": [
+    {
+      "node_title": "Exact title of the newly extracted node from above",
+      "existing_node_id": "ID of the OpenIssue node it resolves"
     }
   ]
 }
@@ -300,6 +315,10 @@ ${sessionEvents.map((e) => JSON.stringify(e)).join("\n")}
         confidence = Math.max(0.0, Math.min(1.0, rawNode.confidence));
       }
 
+      const symbols = Array.isArray(rawNode.symbols)
+        ? rawNode.symbols.filter((s: any) => typeof s === "string" && s.trim() !== "").map((s: string) => s.trim())
+        : [];
+
       const input: CreateNodeInput = {
         type: nodeType,
         title,
@@ -312,7 +331,7 @@ ${sessionEvents.map((e) => JSON.stringify(e)).join("\n")}
           agent,
           timestamp,
           confidence,
-          symbols: [], // Per §10 non-goal, symbols remains empty array in V1
+          symbols,
         },
       };
 
@@ -343,20 +362,30 @@ ${sessionEvents.map((e) => JSON.stringify(e)).join("\n")}
       }
     }
 
+    // Helper to find target node by ID or title
+    const findTargetNode = (edgeStore: GraphStore, targetRef?: string): KnowledgeNode | undefined => {
+      if (!targetRef) return undefined;
+      const byId = edgeStore.getNode(targetRef);
+      if (byId) return byId;
+      const all = edgeStore.queryAllNodes();
+      return all.find((n) => n.title === targetRef || n.id === targetRef);
+    };
+
     // Process LLM proposed contradictions from batched call
     if (Array.isArray(parsed.contradicts_edges) && parsed.contradicts_edges.length > 0) {
       try {
         const edgeStore = new GraphStore({ projectRoot, ephemeral: mockLlm || process.env.DEV_MEM_MOCK_LLM === "1" });
         for (const edge of parsed.contradicts_edges) {
           const srcNode = insertedNodes.find(n => n.title === edge.node_title);
-          if (srcNode && edge.existing_node_id) {
+          const targetNode = findTargetNode(edgeStore, edge.existing_node_id);
+          if (srcNode && targetNode) {
             try {
               edgeStore.createEdge({
                 from_id: srcNode.id,
-                to_id: edge.existing_node_id,
+                to_id: targetNode.id,
                 type: "contradicts"
               });
-              console.warn(`[dev-mem] LLM Contradiction detected: "${srcNode.title}" ↔ [ID: ${edge.existing_node_id}]`);
+              console.warn(`[dev-mem] LLM Contradiction detected: "${srcNode.title}" ↔ [ID: ${targetNode.id}]`);
             } catch (e) {
                // ignore duplicate edges or bad IDs
             }
@@ -368,12 +397,86 @@ ${sessionEvents.map((e) => JSON.stringify(e)).join("\n")}
       }
     }
 
+    // Process LLM proposed supersedes edges
+    if (Array.isArray(parsed.supersedes_edges) && parsed.supersedes_edges.length > 0) {
+      try {
+        const edgeStore = new GraphStore({ projectRoot, ephemeral: mockLlm || process.env.DEV_MEM_MOCK_LLM === "1" });
+        for (const edge of parsed.supersedes_edges) {
+          const srcNode = insertedNodes.find((n) => n.title === edge.node_title);
+          const targetNode = findTargetNode(edgeStore, edge.existing_node_id || edge.target_id || edge.node_id || edge.target_title);
+          if (srcNode && targetNode) {
+            try {
+              edgeStore.createEdge({
+                from_id: srcNode.id,
+                to_id: targetNode.id,
+                type: "supersedes",
+              });
+              if (targetNode.lifecycle_state !== "superseded") {
+                try {
+                  edgeStore.transitionLifecycleState(targetNode.id, "superseded");
+                } catch {
+                  // Ignore invalid transition
+                }
+              }
+              console.warn(`[dev-mem] Supersedes edge created: "${srcNode.title}" → "${targetNode.title}"`);
+            } catch {
+              // Ignore duplicate edges or bad IDs
+            }
+          }
+        }
+        edgeStore.close();
+      } catch (err) {
+        // Ignore
+      }
+    }
+
+    // Process LLM proposed resolves edges
+    if (Array.isArray(parsed.resolves_edges) && parsed.resolves_edges.length > 0) {
+      try {
+        const edgeStore = new GraphStore({ projectRoot, ephemeral: mockLlm || process.env.DEV_MEM_MOCK_LLM === "1" });
+        for (const edge of parsed.resolves_edges) {
+          const srcNode = insertedNodes.find((n) => n.title === edge.node_title);
+          const targetNode = findTargetNode(edgeStore, edge.existing_node_id || edge.target_id || edge.node_id || edge.target_title);
+          if (srcNode && targetNode) {
+            try {
+              edgeStore.createEdge({
+                from_id: srcNode.id,
+                to_id: targetNode.id,
+                type: "resolves",
+              });
+              if (targetNode.type === "OpenIssue" && targetNode.lifecycle_state !== "superseded") {
+                try {
+                  edgeStore.transitionLifecycleState(targetNode.id, "superseded");
+                } catch {
+                  // Ignore invalid transition
+                }
+              }
+              console.warn(`[dev-mem] Resolves edge created: "${srcNode.title}" → "${targetNode.title}"`);
+            } catch {
+              // Ignore duplicate edges or bad IDs
+            }
+          }
+        }
+        edgeStore.close();
+      } catch (err) {
+        // Ignore
+      }
+    }
+
+    const insertedIds = insertedNodes.map((n) => n.id);
+
     // Staleness: run once per extraction on existing graph state, excluding nodes just inserted
     try {
-      const insertedIds = insertedNodes.map((n) => n.id);
       checkStaleness(projectRoot, undefined, insertedIds);
     } catch (sErr: any) {
       console.error(`[dev-mem] Staleness check failed: ${sErr.message}`);
+    }
+
+    // Promote surviving observed nodes whose cited files were touched and exist on disk
+    try {
+      promoteSurvivingNodes(projectRoot, Array.from(touchedFilesSet), insertedIds);
+    } catch (pErr: any) {
+      console.error(`[dev-mem] Node promotion failed: ${pErr.message}`);
     }
 
     return { success: true, nodes: insertedNodes };

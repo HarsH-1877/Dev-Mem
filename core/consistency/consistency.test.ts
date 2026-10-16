@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { GraphStore } from "../../core/graph/index.js";
-import { checkContradictions, checkStaleness } from "../../core/consistency/index.js";
+import { checkContradictions, checkStaleness, promoteSurvivingNodes } from "../../core/consistency/index.js";
 
 let tmpDir: string;
 let dbPath: string;
@@ -186,5 +186,72 @@ describe("checkContradictions (heuristic, no API key)", () => {
 
     // FailedApproach is not in CONTRADICTION_TYPES, should not be flagged
     expect(result.edgesCreated).toHaveLength(0);
+  });
+});
+
+describe("Symbol-level staleness and lifecycle promotion (v0.4)", () => {
+  it("marks a node stale when its cited file still exists but all cited symbols were removed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dm-sym-stale-"));
+    try {
+      mkdirSync(join(dir, "src"), { recursive: true });
+      writeFileSync(join(dir, "src", "auth.ts"), "export function newLoginFlow() { return true; }\n", "utf8");
+
+      const store = new GraphStore({ projectRoot: dir });
+      const node = store.createNode({
+        type: "Discovery",
+        title: "legacyVerifyToken has a timing side-channel",
+        content: "Found in legacyVerifyToken",
+        lifecycle_state: "active",
+        evidence: {
+          commit: "1111111111111111111111111111111111111111",
+          files: ["src/auth.ts"],
+          symbols: ["legacyVerifyToken"],
+          session_id: "s1",
+          agent: "claude-code",
+          timestamp: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      });
+      store.close();
+
+      const res = checkStaleness(dir);
+      expect(res.markedStale).toContain(node.id);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("promotes observed nodes to active when their files survive a follow-up session", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dm-promote-"));
+    try {
+      mkdirSync(join(dir, "src"), { recursive: true });
+      writeFileSync(join(dir, "src", "db.ts"), "export const pool = {};\n", "utf8");
+
+      const store = new GraphStore({ projectRoot: dir });
+      const node = store.createNode({
+        type: "Decision",
+        title: "Use connection pooling in db.ts",
+        content: "Prevents connection exhaustion",
+        lifecycle_state: "observed",
+        evidence: {
+          commit: "1111111111111111111111111111111111111111",
+          files: ["src/db.ts"],
+          session_id: "s1",
+          agent: "claude-code",
+          timestamp: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      });
+      store.close();
+
+      const promoted = promoteSurvivingNodes(dir, ["src/db.ts"]);
+      expect(promoted).toContain(node.id);
+
+      const store2 = new GraphStore({ projectRoot: dir });
+      expect(store2.getNode(node.id)?.lifecycle_state).toBe("active");
+      store2.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

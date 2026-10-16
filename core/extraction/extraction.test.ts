@@ -283,4 +283,177 @@ describe("Batched LLM Extraction (spec §7.2)", () => {
       process.env = saved;
     }
   });
+
+  it("extracts symbols and creates supersedes edges to retire replaced decisions", async () => {
+    const sessionId = "sess-supersede";
+    const capture = new DeterministicCapture({
+      projectRoot: testDir,
+      agent: "claude-code",
+      sessionId,
+    });
+    capture.startSession();
+    capture.recordFileTouch("src/notify.ts", "modified");
+    capture.endSession();
+
+    const store = new GraphStore({ projectRoot: testDir });
+    const oldDecision = store.createNode({
+      type: "Decision",
+      title: "Use REST polling for notifications",
+      content: "Poll every 5 seconds",
+      lifecycle_state: "active",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["src/notify.ts"],
+        session_id: "s0",
+        agent: "claude-code",
+        timestamp: new Date().toISOString(),
+        confidence: 0.9,
+      },
+    });
+    store.close();
+
+    const customLlmResponse = JSON.stringify({
+      nodes: [
+        {
+          type: "Decision",
+          title: "Use WebSockets for notifications",
+          content: "Replaced REST polling with WebSockets",
+          files: ["src/notify.ts"],
+          symbols: ["NotificationSocket"],
+          confidence: 0.95,
+        },
+      ],
+      supersedes_edges: [
+        {
+          node_title: "Use WebSockets for notifications",
+          existing_node_id: oldDecision.id,
+        },
+      ],
+    });
+
+    const result = await runExtraction({
+      projectRoot: testDir,
+      sessionId,
+      customLlmResponse,
+    });
+    expect(result.success).toBe(true);
+    expect(result.nodes[0].evidence.symbols).toEqual(["NotificationSocket"]);
+
+    const verifyStore = new GraphStore({ projectRoot: testDir });
+    try {
+      expect(verifyStore.getNode(oldDecision.id)?.lifecycle_state).toBe("superseded");
+    } finally {
+      verifyStore.close();
+    }
+  });
+
+  it("extracts resolves edges and marks resolved OpenIssue nodes as superseded", async () => {
+    const sessionId = "sess-resolves";
+    const capture = new DeterministicCapture({
+      projectRoot: testDir,
+      agent: "claude-code",
+      sessionId,
+    });
+    capture.startSession();
+    capture.recordFileTouch("src/auth.ts", "modified");
+    capture.endSession();
+
+    const store = new GraphStore({ projectRoot: testDir });
+    const openIssue = store.createNode({
+      type: "OpenIssue",
+      title: "Memory leak in token verification cache",
+      content: "Cache never purges expired tokens",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["src/auth.ts"],
+        session_id: "s0",
+        agent: "claude-code",
+        timestamp: new Date().toISOString(),
+        confidence: 0.9,
+      },
+    });
+    store.close();
+
+    const customLlmResponse = JSON.stringify({
+      nodes: [
+        {
+          type: "Decision",
+          title: "Implement TTL cache for token verification",
+          content: "Use LRU cache with 5min TTL to fix memory leak",
+          files: ["src/auth.ts"],
+          symbols: ["TokenCache"],
+          confidence: 0.95,
+        },
+      ],
+      resolves_edges: [
+        {
+          node_title: "Implement TTL cache for token verification",
+          existing_node_id: openIssue.id,
+        },
+      ],
+    });
+
+    const result = await runExtraction({
+      projectRoot: testDir,
+      sessionId,
+      customLlmResponse,
+    });
+    expect(result.success).toBe(true);
+
+    const verifyStore = new GraphStore({ projectRoot: testDir });
+    try {
+      expect(verifyStore.getNode(openIssue.id)?.lifecycle_state).toBe("superseded");
+      const edges = verifyStore.listEdges();
+      const resolveEdge = edges.find((e) => e.type === "resolves");
+      expect(resolveEdge).toBeDefined();
+      expect(resolveEdge?.to_id).toBe(openIssue.id);
+    } finally {
+      verifyStore.close();
+    }
+  });
+
+  it("promotes surviving observed nodes when touched files survive subsequent session extraction", async () => {
+    const store = new GraphStore({ projectRoot: testDir });
+    const existingNode = store.createNode({
+      type: "Decision",
+      title: "Initial feature design",
+      content: "Uses README documentation",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["README.md"],
+        session_id: "s0",
+        agent: "claude-code",
+        timestamp: new Date().toISOString(),
+        confidence: 0.9,
+      },
+    });
+    store.close();
+
+    const sessionId = "sess-followup-promo";
+    const capture = new DeterministicCapture({
+      projectRoot: testDir,
+      agent: "claude-code",
+      sessionId,
+    });
+    capture.startSession();
+    capture.recordFileTouch("README.md", "modified");
+    capture.endSession();
+
+    const result = await runExtraction({
+      projectRoot: testDir,
+      sessionId,
+      customLlmResponse: JSON.stringify({ nodes: [] }),
+    });
+    expect(result.success).toBe(true);
+
+    const verifyStore = new GraphStore({ projectRoot: testDir });
+    try {
+      expect(verifyStore.getNode(existingNode.id)?.lifecycle_state).toBe("active");
+    } finally {
+      verifyStore.close();
+    }
+  });
 });
+

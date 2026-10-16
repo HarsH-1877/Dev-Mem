@@ -18,7 +18,7 @@
  *    Existence check only — no semantic re-validation (§8.2 explicit scope limit).
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GraphStore } from "../graph/index.js";
 import type { KnowledgeNode } from "../graph/types.js";
@@ -170,9 +170,8 @@ export interface StalenessResult {
 
 /**
  * Walks all active/verified/observed nodes and marks stale any whose
- * cited files no longer exist on disk.
+ * cited files no longer exist on disk, or whose cited symbols no longer appear in existing cited files.
  *
- * Existence check only — no deep semantic re-validation (§8.2 scope limit).
  * Does not throw.
  */
 export function checkStaleness(
@@ -199,19 +198,41 @@ export function checkStaleness(
         continue;
       }
 
-      // Check that at least one cited file still exists.
-      // If ALL files are missing → stale. If at least one exists → still valid.
-      const allMissing = node.evidence.files.every(
-        (f) => !existsSync(join(projectRoot, f))
+      const files = node.evidence.files || [];
+      const existingFiles = files.filter((f) =>
+        existsSync(join(projectRoot, f))
       );
 
-      if (allMissing) {
+      let isStale = existingFiles.length === 0;
+      let reason = `all cited files missing: ${files.join(", ")}`;
+
+      // Symbol-level grounding check: if files exist and node cites symbols,
+      // check whether at least one cited symbol still appears in the existing files.
+      if (!isStale && Array.isArray(node.evidence.symbols) && node.evidence.symbols.length > 0) {
+        const combinedSource = existingFiles
+          .map((f) => {
+            try {
+              return readFileSync(join(projectRoot, f), "utf8");
+            } catch {
+              return "";
+            }
+          })
+          .join("\n");
+
+        const anySymbolPresent = node.evidence.symbols.some((sym) =>
+          sym && combinedSource.includes(sym)
+        );
+        if (!anySymbolPresent) {
+          isStale = true;
+          reason = `all cited symbols (${node.evidence.symbols.join(", ")}) removed from ${existingFiles.join(", ")}`;
+        }
+      }
+
+      if (isStale) {
         try {
           store.transitionLifecycleState(node.id, "stale");
           result.markedStale.push(node.id);
-          const detail =
-            `Node "${node.title}" marked stale — all cited files missing: ` +
-            node.evidence.files.join(", ");
+          const detail = `Node "${node.title}" marked stale — ${reason}`;
           result.details.push(detail);
           console.warn(`[dev-mem] Staleness: ${detail}`);
         } catch (transitionErr: any) {
@@ -229,3 +250,48 @@ export function checkStaleness(
 
   return result;
 }
+
+/**
+ * Promotes `observed` nodes to `active` when a subsequent session touches or
+ * validates their cited files and the files still exist on disk.
+ */
+export function promoteSurvivingNodes(
+  projectRoot: string,
+  touchedFiles: string[],
+  excludeNodeIds?: string[],
+  dbPath?: string,
+): string[] {
+  const promoted: string[] = [];
+  if (touchedFiles.length === 0) return promoted;
+
+  const excludeSet = new Set(excludeNodeIds || []);
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/^\.\//, "");
+  const touchedSet = new Set(touchedFiles.map(norm));
+
+  const store = new GraphStore({ projectRoot, dbPath, ephemeral: dbPath !== undefined });
+  try {
+    const allNodes = store.queryAllNodes();
+    for (const node of allNodes) {
+      if (excludeSet.has(node.id)) continue;
+      if (node.lifecycle_state !== "observed") continue;
+
+      const touchesExistingFile = (node.evidence.files || []).some(
+        (f) => touchedSet.has(norm(f)) && existsSync(join(projectRoot, f))
+      );
+      if (!touchesExistingFile) continue;
+
+      try {
+        store.transitionLifecycleState(node.id, "active");
+        promoted.push(node.id);
+      } catch {
+        // Ignore invalid transition
+      }
+    }
+  } catch {
+    // Ignore store read errors
+  } finally {
+    store.close();
+  }
+  return promoted;
+}
+

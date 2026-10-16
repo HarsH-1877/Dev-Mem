@@ -7,6 +7,7 @@ import {
   calculateRelevance,
   jaccard,
   tokenise,
+  stemToken,
   retrieveContext,
   generateInjectionString,
 } from "./index.js";
@@ -18,7 +19,7 @@ import type { KnowledgeNode } from "../graph/types.js";
 describe("tokenise", () => {
   it("splits on non-word chars and lowercases", () => {
     const tokens = tokenise("Use Firebase Auth");
-    expect(tokens.has("firebase")).toBe(true);
+    expect(tokens.has(stemToken("Firebase"))).toBe(true);
     expect(tokens.has("auth")).toBe(true);
   });
 
@@ -37,7 +38,7 @@ describe("tokenise", () => {
     expect(tokens.has("the")).toBe(false);
     expect(tokens.has("same")).toBe(true);
     expect(tokens.has("pattern")).toBe(true);
-    expect(tokens.has("endpoints")).toBe(true);
+    expect(tokens.has("endpoint")).toBe(true);
   });
 
   it("splits file paths into tokens", () => {
@@ -282,3 +283,179 @@ describe("retrieveContext — relevance filtering", () => {
     expect(generateInjectionString(results)).toBe("");
   });
 });
+
+describe("Morphological stemming and lifecycle filtering (v0.4)", () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), "dev-mem-stem-test-"));
+    initGitRepo(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it("stems common English suffixes to a shared root", () => {
+    expect(stemToken("authentication")).toBe(stemToken("authenticating"));
+    expect(stemToken("authenticated")).toBe(stemToken("authenticate"));
+    expect(stemToken("deployments")).toBe(stemToken("deploying"));
+    expect(stemToken("retries")).toBe(stemToken("retried"));
+  });
+
+  it("matches inflected task queries against root words in nodes", () => {
+    const store = new GraphStore({ projectRoot: testDir });
+    store.createNode({
+      type: "FailedApproach",
+      title: "Authenticating with cookies failed in edge middleware",
+      content: "Cookie validation broke during deployment",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["src/auth.ts"],
+        session_id: "s1",
+        agent: "claude-code",
+        timestamp: new Date().toISOString(),
+        confidence: 0.9,
+      },
+    });
+    store.close();
+
+    const results = retrieveContext({
+      projectRoot: testDir,
+      currentTask: "fix authentication deployment issue",
+    });
+    expect(results.length).toBe(1);
+    expect(results[0].score).toBeGreaterThan(0.5);
+  });
+
+  it("excludes stale and superseded nodes from retrieveContext", () => {
+    const store = new GraphStore({ projectRoot: testDir });
+    const n1 = store.createNode({
+      type: "Decision",
+      title: "Use Redis for session caching",
+      content: "Fast ephemeral cache",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["src/cache.ts"],
+        session_id: "s1",
+        agent: "claude-code",
+        timestamp: new Date().toISOString(),
+        confidence: 0.9,
+      },
+    });
+    const n2 = store.createNode({
+      type: "Decision",
+      title: "Use Memcached for session caching",
+      content: "Old cache decision",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "2222222222222222222222222222222222222222",
+        files: ["src/cache.ts"],
+        session_id: "s0",
+        agent: "claude-code",
+        timestamp: new Date().toISOString(),
+        confidence: 0.9,
+      },
+    });
+    store.transitionLifecycleState(n2.id, "stale");
+
+    const n3 = store.createNode({
+      type: "Decision",
+      title: "Use File cache for session caching",
+      content: "Another old cache decision",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "3333333333333333333333333333333333333333",
+        files: ["src/cache.ts"],
+        session_id: "s0",
+        agent: "claude-code",
+        timestamp: new Date().toISOString(),
+        confidence: 0.9,
+      },
+    });
+    store.transitionLifecycleState(n3.id, "superseded");
+    store.close();
+
+    const results = retrieveContext({
+      projectRoot: testDir,
+      currentTask: "session caching",
+      budgetTokens: 1000,
+    });
+    expect(results.map((r) => r.id)).toEqual([n1.id]);
+  });
+
+  it("applies lifecycle score multipliers (verified 1.10, active 1.05, observed 1.00) clamped to <= 1.0", () => {
+    const store = new GraphStore({ projectRoot: testDir });
+    const now = new Date().toISOString();
+    const nObserved = store.createNode({
+      type: "Decision",
+      title: "Strategy pattern for payments",
+      content: "Payment strategy",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["src/pay.ts"],
+        session_id: "s1",
+        agent: "claude-code",
+        timestamp: now,
+        confidence: 0.8,
+      },
+    });
+    const nActive = store.createNode({
+      type: "Decision",
+      title: "Strategy pattern for payments",
+      content: "Payment strategy",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["src/pay.ts"],
+        session_id: "s1",
+        agent: "claude-code",
+        timestamp: now,
+        confidence: 0.8,
+      },
+    });
+    store.transitionLifecycleState(nActive.id, "active");
+
+    const nVerified = store.createNode({
+      type: "Decision",
+      title: "Strategy pattern for payments",
+      content: "Payment strategy",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["src/pay.ts"],
+        session_id: "s1",
+        agent: "claude-code",
+        timestamp: now,
+        confidence: 0.8,
+      },
+    });
+    store.transitionLifecycleState(nVerified.id, "verified");
+    store.close();
+
+    const results = retrieveContext({
+      projectRoot: testDir,
+      currentTask: "payments strategy",
+      budgetTokens: 2000,
+    });
+
+    const resObserved = results.find((r) => r.id === nObserved.id)!;
+    const resActive = results.find((r) => r.id === nActive.id)!;
+    const resVerified = results.find((r) => r.id === nVerified.id)!;
+
+    expect(resObserved).toBeDefined();
+    expect(resActive).toBeDefined();
+    expect(resVerified).toBeDefined();
+
+    // Active score = observed score * 1.05
+    expect(resActive.score).toBeCloseTo(resObserved.score * 1.05);
+    // Verified score = observed score * 1.10
+    expect(resVerified.score).toBeCloseTo(resObserved.score * 1.10);
+    // Verified should be <= 1.0
+    expect(resVerified.score).toBeLessThanOrEqual(1.0);
+  });
+});
+

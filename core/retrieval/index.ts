@@ -38,15 +38,63 @@ const STOPWORDS = new Set([
 ]);
 
 /**
+ * Lightweight, zero-dependency English suffix stemmer for code & prose tokens.
+ * Normalises inflections (authentication/authenticating/authenticated → authent)
+ * without external NLP libraries.
+ */
+export function stemToken(word: string): string {
+  let w = word.toLowerCase();
+  if (w.length <= 4) return w;
+
+  // Step 1: plurals and -ied / -ies
+  if (w.endsWith("ies") && w.length > 4) {
+    w = w.slice(0, -3) + "y";
+  } else if (w.endsWith("ied") && w.length > 4) {
+    w = w.slice(0, -3) + "y";
+  } else if (w.endsWith("es") && (w.endsWith("sses") || w.endsWith("ches") || w.endsWith("shes") || w.endsWith("xes"))) {
+    w = w.slice(0, -2);
+  } else if (w.endsWith("s") && !w.endsWith("ss") && !w.endsWith("us") && !w.endsWith("is")) {
+    w = w.slice(0, -1);
+  }
+
+  // Step 2: derivational & inflectional suffixes (longest match first)
+  const suffixes = [
+    "ications", "ication", "icating", "icated", "icates", "icate",
+    "izations", "ization", "izing", "ized", "izes", "ize",
+    "ational", "fulness", "ousness", "iveness", "ements", "ement",
+    "ating", "ation", "ances", "ance", "ences", "ence", "ments", "ment",
+    "ings", "ing", "able", "ible", "ated", "ates", "ate", "full",
+    "less", "ness", "ers", "er", "ed", "ly",
+  ];
+  for (const suffix of suffixes) {
+    if (w.endsWith(suffix) && w.length - suffix.length >= 4) {
+      w = w.slice(0, -suffix.length);
+      break;
+    }
+  }
+
+  // Step 3: trailing silent 'e' or doubled consonant cleanup
+  if (w.endsWith("e") && w.length > 4) {
+    w = w.slice(0, -1);
+  }
+  if (w.length > 4 && /([bcdfghjklmnpqrstvwxz])\1$/.test(w)) {
+    w = w.slice(0, -1);
+  }
+  return w;
+}
+
+/**
  * Splits text into a normalised token set for overlap comparison.
  * Splits on non-word chars (handles both prose and file paths),
- * lowercases, drops stopwords and tokens shorter than 3 characters.
+ * lowercases, drops stopwords, tokens shorter than 3 characters,
+ * and stems each token.
  */
 function tokenise(text: string): Set<string> {
   const tokens = text
     .toLowerCase()
     .split(/[\W_]+/)
-    .filter(t => t.length >= 3 && !STOPWORDS.has(t));
+    .filter(t => t.length >= 3 && !STOPWORDS.has(t))
+    .map(stemToken);
   return new Set(tokens);
 }
 
@@ -214,7 +262,9 @@ export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
 
   let nodes: KnowledgeNode[] = [];
   try {
-    nodes = store.queryAllNodes();
+    nodes = store
+      .queryAllNodes()
+      .filter((n) => n.lifecycle_state !== "stale" && n.lifecycle_state !== "superseded");
   } finally {
     store.close();
   }
@@ -230,11 +280,17 @@ export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
     const confidence = node.evidence.confidence;
     const proximity  = calculateGraphProximity(node, currentFiles);
 
-    const score =
+    const baseScore =
       W_RELEVANCE  * relevance  +
       W_FRESHNESS  * freshness  +
       W_CONFIDENCE * confidence +
       W_PROXIMITY  * proximity;
+
+    const lifecycleMultiplier =
+      node.lifecycle_state === "verified" ? 1.10 :
+      node.lifecycle_state === "active" ? 1.05 : 1.0;
+
+    const score = Math.min(1.0, baseScore * lifecycleMultiplier);
 
     const injectionText = formatNode(node);
     const cost = estimateTokens(injectionText);

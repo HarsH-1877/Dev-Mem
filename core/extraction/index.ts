@@ -371,95 +371,90 @@ ${sessionEvents.map((e) => JSON.stringify(e)).join("\n")}
       return all.find((n) => n.title === targetRef || n.id === targetRef);
     };
 
-    // Process LLM proposed contradictions from batched call
-    if (Array.isArray(parsed.contradicts_edges) && parsed.contradicts_edges.length > 0) {
-      try {
-        const edgeStore = new GraphStore({ projectRoot, ephemeral: mockLlm || process.env.DEV_MEM_MOCK_LLM === "1" });
-        for (const edge of parsed.contradicts_edges) {
-          const srcNode = insertedNodes.find(n => n.title === edge.node_title);
-          const targetNode = findTargetNode(edgeStore, edge.existing_node_id);
-          if (srcNode && targetNode) {
-            try {
-              edgeStore.createEdge({
-                from_id: srcNode.id,
-                to_id: targetNode.id,
-                type: "contradicts"
-              });
-              console.warn(`[dev-mem] LLM Contradiction detected: "${srcNode.title}" ↔ [ID: ${targetNode.id}]`);
-            } catch (e) {
-               // ignore duplicate edges or bad IDs
-            }
-          }
-        }
-        edgeStore.close();
-      } catch (err) {
-        // Ignore
-      }
-    }
+    // Process LLM proposed edges (contradicts, supersedes, resolves)
+    const hasContradicts = Array.isArray(parsed.contradicts_edges) && parsed.contradicts_edges.length > 0;
+    const hasSupersedes = Array.isArray(parsed.supersedes_edges) && parsed.supersedes_edges.length > 0;
+    const hasResolves = Array.isArray(parsed.resolves_edges) && parsed.resolves_edges.length > 0;
 
-    // Process LLM proposed supersedes edges
-    if (Array.isArray(parsed.supersedes_edges) && parsed.supersedes_edges.length > 0) {
+    if (hasContradicts || hasSupersedes || hasResolves) {
+      let edgeStore: GraphStore | undefined;
       try {
-        const edgeStore = new GraphStore({ projectRoot, ephemeral: mockLlm || process.env.DEV_MEM_MOCK_LLM === "1" });
-        for (const edge of parsed.supersedes_edges) {
-          const srcNode = insertedNodes.find((n) => n.title === edge.node_title);
-          const targetNode = findTargetNode(edgeStore, edge.existing_node_id || edge.target_id || edge.node_id || edge.target_title);
-          if (srcNode && targetNode) {
-            try {
-              edgeStore.createEdge({
-                from_id: srcNode.id,
-                to_id: targetNode.id,
-                type: "supersedes",
-              });
-              if (targetNode.lifecycle_state !== "superseded") {
-                try {
-                  edgeStore.transitionLifecycleState(targetNode.id, "superseded");
-                } catch {
-                  // Ignore invalid transition
-                }
-              }
-              console.warn(`[dev-mem] Supersedes edge created: "${srcNode.title}" → "${targetNode.title}"`);
-            } catch {
-              // Ignore duplicate edges or bad IDs
-            }
-          }
-        }
-        edgeStore.close();
-      } catch (err) {
-        // Ignore
-      }
-    }
+        edgeStore = new GraphStore({ projectRoot, ephemeral: mockLlm || process.env.DEV_MEM_MOCK_LLM === "1" });
 
-    // Process LLM proposed resolves edges
-    if (Array.isArray(parsed.resolves_edges) && parsed.resolves_edges.length > 0) {
-      try {
-        const edgeStore = new GraphStore({ projectRoot, ephemeral: mockLlm || process.env.DEV_MEM_MOCK_LLM === "1" });
-        for (const edge of parsed.resolves_edges) {
-          const srcNode = insertedNodes.find((n) => n.title === edge.node_title);
-          const targetNode = findTargetNode(edgeStore, edge.existing_node_id || edge.target_id || edge.node_id || edge.target_title);
-          if (srcNode && targetNode) {
-            try {
-              edgeStore.createEdge({
-                from_id: srcNode.id,
-                to_id: targetNode.id,
-                type: "resolves",
-              });
-              if (targetNode.type === "OpenIssue" && targetNode.lifecycle_state !== "superseded") {
-                try {
-                  edgeStore.transitionLifecycleState(targetNode.id, "superseded");
-                } catch {
-                  // Ignore invalid transition
-                }
+        if (hasContradicts) {
+          for (const edge of parsed.contradicts_edges) {
+            const srcNode = insertedNodes.find((n) => n.title === edge.node_title);
+            const targetNode = findTargetNode(edgeStore, edge.existing_node_id);
+            if (srcNode && targetNode) {
+              try {
+                edgeStore.createEdge({
+                  from_id: srcNode.id,
+                  to_id: targetNode.id,
+                  type: "contradicts",
+                });
+                console.warn(`[dev-mem] LLM Contradiction detected: "${srcNode.title}" ↔ [ID: ${targetNode.id}]`);
+              } catch {
+                // ignore duplicate edges or bad IDs
               }
-              console.warn(`[dev-mem] Resolves edge created: "${srcNode.title}" → "${targetNode.title}"`);
-            } catch {
-              // Ignore duplicate edges or bad IDs
             }
           }
         }
-        edgeStore.close();
-      } catch (err) {
+
+        if (hasSupersedes) {
+          for (const edge of parsed.supersedes_edges) {
+            const srcNode = insertedNodes.find((n) => n.title === edge.node_title);
+            const targetNode = findTargetNode(edgeStore, edge.existing_node_id || edge.target_id || edge.node_id || edge.target_title);
+            if (srcNode && targetNode) {
+              try {
+                edgeStore.createEdge({
+                  from_id: srcNode.id,
+                  to_id: targetNode.id,
+                  type: "supersedes",
+                });
+                if (targetNode.lifecycle_state !== "superseded") {
+                  try {
+                    edgeStore.transitionLifecycleState(targetNode.id, "superseded");
+                  } catch {
+                    // Ignore invalid transition
+                  }
+                }
+                console.warn(`[dev-mem] Supersedes edge created: "${srcNode.title}" → "${targetNode.title}"`);
+              } catch {
+                // Ignore duplicate edges or bad IDs
+              }
+            }
+          }
+        }
+
+        if (hasResolves) {
+          for (const edge of parsed.resolves_edges) {
+            const srcNode = insertedNodes.find((n) => n.title === edge.node_title);
+            const targetNode = findTargetNode(edgeStore, edge.existing_node_id || edge.target_id || edge.node_id || edge.target_title);
+            if (srcNode && targetNode) {
+              try {
+                edgeStore.createEdge({
+                  from_id: srcNode.id,
+                  to_id: targetNode.id,
+                  type: "resolves",
+                });
+                if (targetNode.type === "OpenIssue" && targetNode.lifecycle_state !== "superseded") {
+                  try {
+                    edgeStore.transitionLifecycleState(targetNode.id, "superseded");
+                  } catch {
+                    // Ignore invalid transition
+                  }
+                }
+                console.warn(`[dev-mem] Resolves edge created: "${srcNode.title}" → "${targetNode.title}"`);
+              } catch {
+                // Ignore duplicate edges or bad IDs
+              }
+            }
+          }
+        }
+      } catch {
         // Ignore
+      } finally {
+        edgeStore?.close();
       }
     }
 

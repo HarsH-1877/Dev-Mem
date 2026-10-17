@@ -1,7 +1,7 @@
 # Dev-Mem — Technical Report
 
-**Version:** 0.2.1 (V2 Feature-Complete)  
-**Date:** September 2026  
+**Version:** 0.4.0 (Competitive Upgrade)  
+**Date:** October 2026  
 **Author:** Harsh Asalkar  
 **Repository:** [github.com/HarsH-1877/Dev-Mem](https://github.com/HarsH-1877/Dev-Mem)  
 **Package:** [npmjs.com/package/dev-memo](https://www.npmjs.com/package/dev-memo)  
@@ -488,6 +488,26 @@ The `collectGitSnapshot()` function runs the following git commands:
 
 All git operations are synchronous (`execFileSync`) and gracefully degrade if git is unavailable or the directory is not a repository.
 
+#### 6.2.4 In-Memory Privacy Scrubbing & High-Entropy Secret Redaction
+
+**Location:** `core/capture/sanitize.ts`
+
+Prior to Dev-Mem v0.4.0, raw tool call inputs, stdout, stderr, and git diffs were written verbatim to `.dev-mem/events.jsonl`. If an agent inspected a `.env` file or ran curl commands with credentials, secrets could leak into persistent disk storage.
+
+In v0.4.0, Dev-Mem introduces immutable synchronous event scrubbing via `sanitizeEvent()` wired directly into `EventLog.append()`. Secrets are scrubbed in memory *before* being written to disk or appended to event buffers:
+
+- **Explicit Privacy Tags:** Any text enclosed in `<private>...</private>` tags (multiline, case-insensitive) is replaced with `[REDACTED_PRIVATE]`.
+- **High-Entropy API Keys & Tokens:** Regex patterns detect and redact:
+  - Anthropic API keys (`sk-ant-api\d{2}-[a-zA-Z0-9_\-]{20,}`)
+  - OpenAI API keys (`sk-[a-zA-Z0-9_\-]{20,}`)
+  - Google Gemini API keys (`AIza[0-9A-Za-z-_]{35}`)
+  - GitHub Personal Access Tokens (`gh[pousr]_[a-zA-Z0-9]{36,}`, `github_pat_`)
+  - AWS Access Key IDs (`AKIA[0-9A-Z]{16}`)
+  - Slack tokens (`xox[baprs]-[0-9a-zA-Z]{10,}`)
+  - Authorization Bearer tokens (`Bearer ...`)
+  - `.env` secret assignments (`(API_KEY|SECRET|TOKEN|PASSWORD|AUTH)=...`)
+- Redacted credentials are replaced with `[REDACTED_SECRET]`.
+
 ---
 
 ### 6.3 LLM Extraction Engine
@@ -589,6 +609,22 @@ The extraction prompt instructs the LLM to output a single JSON object:
 - Extraction **never throws** to the caller. All errors are caught, logged, and return `{ success: false }`.
 - A per-session extraction lock prevents duplicate extractions for the same session.
 - The SessionEnd hook spawns extraction as a **detached background process** to avoid blocking the agent's exit (which has a ~1.5s timeout in Claude Code).
+
+#### 6.3.4 Pre-Extraction Event Compactor & Log Pruning
+
+**Location:** `core/capture/compact.ts`
+
+Feeding raw session events into the extraction prompt wastes expensive context tokens on repetitive reads, verbose build logs, and redundant git snapshots.
+
+Dev-Mem v0.4.0 introduces `compactSessionEventsForPrompt()` before the LLM prompt is assembled:
+- **Pre-execution Filtering:** Drops placeholder sentinel tool events (`exit_code === -1`).
+- **Read Deduplication:** Deduplicates multiple `Read` invocations referencing the same file path.
+- **Status Collapsing:** Deduplicates consecutive status checks (`git status`, `status`).
+- **Diagnostic Preservation:** Preserves full `stdout` and `stderr` for failing commands (`exit_code !== 0`), but truncates passing tool standard output (`exit_code === 0`) to 300 characters.
+- **Git Snapshot Compaction:** Strips diffs from non-final git snapshots, and truncates the final git snapshot diff to 500 lines or 20KB.
+- **Log Pruning (`dev-memo prune`):** Removes events belonging to already-extracted sessions from `.dev-mem/events.jsonl` using process-isolated temp files and atomic rename fallback for Windows. Pruning also runs automatically following successful extraction.
+
+Together, compaction reduces extraction prompt token overhead by 70–90% while retaining critical failure diagnostics.
 
 ---
 
@@ -698,6 +734,44 @@ Evidence: src/auth/provider.ts
 </dev_mem_context>
 ```
 
+#### 6.4.6 Morphological Suffix Stemming
+
+**Location:** `core/retrieval/index.ts` (`stemToken`)
+
+To bridge grammatical inflection mismatches without introducing heavy NLP runtime dependencies, v0.4.0 adds a zero-dependency deterministic suffix-stripper (`stemToken`).
+
+`stemToken()` strips common inflections:
+- Regular plurals and verb forms: `-ing`, `-edly`, `-ed`, `-es`, `-s`
+- Derived nouns: `-tion`, `-ment`, `-ness`, `-able`, `-ible`, `-al`
+- Suffix transformations: `-ies` $\rightarrow$ `-y`, `-ied` $\rightarrow$ `-y`
+
+Every token produced by `tokenise()` is normalized through `stemToken()`. As a result, task queries mentioning "connecting" or "connections" immediately match graph nodes discussing "connection".
+
+#### 6.4.7 Lifecycle State Multipliers & Stale Exclusion
+
+**Location:** `core/retrieval/index.ts`
+
+In v0.4.0, nodes marked with terminal or invalid lifecycles (`stale` or `superseded`) are strictly **excluded** from candidate retrieval.
+
+Surviving active nodes receive confidence multipliers based on their proven durability:
+- `verified`: $1.10\times$ multiplier
+- `active`: $1.05\times$ multiplier
+- `observed`: $1.00\times$ (baseline)
+
+Scores are capped at $\le 1.0$, ensuring verified architectural claims naturally outrank freshly observed ones.
+
+#### 6.4.8 Prompt-Time Delta Injection & Per-Session Deduplication
+
+**Location:** `core/retrieval/session-dedup.ts` (`filterUnseenNodes`)
+
+In earlier versions, context injection occurred solely at `SessionStart`. In conversational agent workflows (e.g. Claude Code or OpenCode), a task evolves across dozens of turns. Injecting all context at the start risks either context loss as the window rolls or token bloat.
+
+In v0.4.0, Dev-Mem introduces **Prompt-Time Delta Injection**:
+- Listens to Claude Code `UserPromptSubmit` and OpenCode `chat.message` events.
+- Scores the graph against the submitted user prompt as `currentTask`.
+- Filters nodes through `filterUnseenNodes(projectRoot, sessionId, candidates)` against `.dev-mem/sessions/<session-id>.injected.json`.
+- Only un-injected nodes scoring above $0.35$ are injected into the turn. Once injected, a node is marked as seen for the duration of that session, guaranteeing zero repeated context tokens or spam across turns.
+
 ---
 
 ### 6.5 Regression Intelligence
@@ -796,13 +870,24 @@ Checks whether a newly extracted node contradicts any existing active node.
 | `never` | `always` |
 | `prohibit`, `forbid` | `require`, `must` |
 
-#### 6.6.2 Staleness Detection
+#### 6.6.2 Staleness Detection & Symbol Grounding
 
-Walks all non-stale, non-superseded nodes and marks any whose cited files no longer exist on disk as `stale`.
+Walks all non-stale, non-superseded nodes and marks any whose cited files or code symbols no longer exist on disk as `stale`.
 
-- **Existence check only** — no semantic re-validation
-- Runs once per extraction, excluding freshly inserted nodes
-- A node is marked stale only if **all** cited files are missing (partial file presence keeps the node valid)
+- **File-Level Staleness:** A node is marked stale if **all** cited files are missing from disk.
+- **Symbol-Level Staleness (v0.4.0):** If cited files exist on disk and `node.evidence.symbols` is populated with functions, classes, or variables, Dev-Mem inspects the contents of those files. If **none** of the cited symbols appear in any of the cited files (e.g. after a refactor or deletion), the node transitions to `stale`.
+- Runs once per extraction, excluding freshly inserted nodes.
+
+#### 6.6.3 Surviving Node Auto-Promotion
+
+**Location:** `core/consistency/index.ts` (`promoteSurvivingNodes`)
+
+In earlier versions, extracted nodes remained in the initial `observed` state until manually verified.
+
+In v0.4.0, Dev-Mem automatically promotes surviving nodes:
+- When a subsequent session completes, Dev-Mem checks all existing `observed` nodes whose cited files were modified or touched during that session.
+- If those files still exist on disk and pass staleness checks, the node is automatically promoted from `observed` to `active`.
+- If a new node defines `supersedes_edges` or `resolves_edges`, the targeted nodes (including resolved `OpenIssue` nodes) are transitioned to `superseded`.
 
 ---
 
@@ -901,6 +986,7 @@ onSessionEnd(transcript) → Trigger batched extraction
 | Lifecycle Event | Claude Code | Codex | Cursor | OpenCode |
 |----------------|------------|-------|--------|----------|
 | **Session Start** | `SessionStart` | `SessionStart` | `sessionStart` | `chat.message` |
+| **Prompt Submission** | `UserPromptSubmit` | — | — | `chat.message` |
 | **Pre-Tool Use** | — | `PreToolUse` | `preToolUse` | — |
 | **Post-Tool Use** | `PostToolUse` | `PostToolUse` | `postToolUse` | `tool.execute.after` |
 | **Stop / Idle** | `Stop` | `Stop` | `stop` | `session.idle` |
@@ -911,6 +997,7 @@ onSessionEnd(transcript) → Trigger batched extraction
 **Claude Code:**
 - Hooks are installed into `.claude/settings.json` and `.claude/hooks/`
 - Full lifecycle support with reliable SessionEnd
+- Mid-session prompt-time delta injection via `UserPromptSubmit` with per-session deduplication (`.dev-mem/sessions/<session-id>.injected.json`)
 - SessionEnd extraction is spawned as a **detached process** to avoid the 1.5-second hook timeout
 
 **Codex:**
@@ -926,6 +1013,7 @@ onSessionEnd(transcript) → Trigger batched extraction
 
 **OpenCode:**
 - Plugin installed into `.opencode/plugins/dev-mem.ts` and `opencode.json`
+- Prompt relevance scoring on `chat.message` with per-session deduplication
 - Uses `session.idle` event as a proxy for session end
 - Turn-based extraction trigger
 
@@ -935,7 +1023,7 @@ When `dev-memo install` runs, it generates the following files:
 
 | Agent | Config File | Hook Scripts |
 |-------|------------|-------------|
-| Claude Code | `.claude/settings.json` | `.claude/hooks/dev-mem-sessionstart.js`, `dev-mem-posttooluse.js`, `dev-mem-stop.js`, `dev-mem-sessionend.js` |
+| Claude Code | `.claude/settings.json` | `.claude/hooks/dev-mem-sessionstart.js`, `dev-mem-user-prompt-submit.js`, `dev-mem-posttooluse.js`, `dev-mem-stop.js`, `dev-mem-sessionend.js` |
 | Codex | `.codex/hooks.json` | `.codex/hooks/dev-mem-sessionstart.js`, `dev-mem-pretooluse.js`, `dev-mem-posttooluse.js`, `dev-mem-stop.js`, `dev-mem-sessionend.js` |
 | Cursor | `.cursor/hooks.json` | `.cursor/hooks/dev-mem-sessionstart.js`, `dev-mem-pretooluse.js`, `dev-mem-posttooluse.js`, `dev-mem-stop.js` |
 | OpenCode | `opencode.json` | `.opencode/plugins/dev-mem.ts` |
@@ -966,9 +1054,11 @@ Hooks are **best-effort observers** and must never terminate or disrupt the host
 |---------|---------|---------|
 | `dev-memo install` | Detect agents, wire hooks, create `.dev-mem/` | `dev-memo install` |
 | `dev-memo status` | Show graph size, lifecycle breakdown, last capture | `dev-memo status` |
+| `dev-memo doctor [--live]` | Check git, hooks currency, resolver health, and LLM configuration | `dev-memo doctor --live` |
 | `dev-memo query "<text>"` | Preview what context would be injected for a task | `dev-memo query "optimize database queries"` |
 | `dev-memo inspect <node-id>` | Full detail of a single node | `dev-memo inspect c4a1e9b2-...` |
 | `dev-memo extract <session>` | Manually trigger extraction | `dev-memo extract sess_001` |
+| `dev-memo prune` | Remove events from already-extracted sessions in `events.jsonl` | `dev-memo prune` |
 | `dev-memo wrap <cmd> [args]` | Run a command and flush events on exit | `dev-memo wrap cursor-agent` |
 | `dev-memo uninstall [--purge]` | Remove hooks; `--purge` deletes `.dev-mem/` | `dev-memo uninstall --purge` |
 
@@ -1179,11 +1269,9 @@ Retrieval scoring uses Jaccard similarity on tokenized text — a bag-of-words a
 
 **Trade-off:** Zero external dependencies and no embedding model requirement. Adequate for V1/V2 graph sizes (< 100 nodes).
 
-### 11.3 No Symbol-Level Grounding
+### 11.3 Symbol-Level Grounding (Delivered in v0.4.0)
 
-Knowledge nodes cite file paths and commits, but not specific functions, classes, or symbols. A node about a function `validateAuth()` in `src/auth.ts` is linked to the file, not the symbol. If `validateAuth()` is renamed but the file persists, the node is not flagged as stale.
-
-**Status:** Deferred to V3 (conditional on evidence that file-level grounding is insufficient).
+In v0.4.0, Dev-Mem added symbol-level provenance and staleness verification. When extracting knowledge, the engine captures referenced identifiers (functions, classes, variables) in `evidence.symbols`. During consistency checks, Dev-Mem checks whether any cited symbol appears in the contents of the cited files. If all cited files exist but none contain any cited symbols, the node transitions to `stale`.
 
 ### 11.4 Cursor SessionEnd Reliability
 
@@ -1193,19 +1281,19 @@ Cursor's CLI does not reliably fire a `SessionEnd` event when the process exits.
 
 ### 11.5 No Team / Multi-Developer Sync
 
-`.dev-mem/` is gitignored by default. Knowledge is strictly per-machine. There is no mechanism for sharing or merging knowledge graphs across team members.
+`.dev-mem/` is gitignored by default. Knowledge is strictly per-machine. Shared team memory sync (`core/sync/`) is scheduled for delivery in Phase 5.
 
 ### 11.6 SQLite as Graph Backend
 
 SQLite with tables + recursive CTEs is unvalidated against embedded graph databases (e.g., Kùzu) for Dev-Mem's specific access pattern: small local graphs with frequent relevance-ranked traversal. Performance is adequate for current graph sizes but may need re-evaluation at scale.
 
-### 11.7 No Automatic Memory Pruning
+### 11.7 Event Log Pruning & Memory Hygiene (Delivered in v0.4.0)
 
-Old, low-confidence, or rarely-retrieved nodes are never automatically deleted. The graph grows monotonically. Staleness detection marks nodes as `stale` but does not remove them.
+In earlier versions, `.dev-mem/events.jsonl` grew monotonically with every session. In v0.4.0, Dev-Mem introduces `dev-memo prune` (and automatic post-extraction pruning), which atomically strips already-extracted events from disk while retaining active events.
 
-### 11.8 Single Extraction LLM Call
+### 11.8 Single Extraction LLM Call & Pre-Extraction Compaction (Delivered in v0.4.0)
 
-Extraction uses a single batched LLM call over the entire session event log. For very long sessions (hundreds of tool calls), the event log may exceed the context window of smaller models.
+For long sessions, raw event logs previously caused prompt bloat. In v0.4.0, Dev-Mem introduces deterministic pre-extraction compaction (`compactSessionEventsForPrompt`), stripping duplicate reads, collapsing repeated status queries, and capping passing tool output to reduce token overhead by 70–90% while keeping failure diagnostics intact.
 
 ---
 

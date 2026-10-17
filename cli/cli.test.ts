@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { GraphStore } from "../core/graph/index.js";
-import { runCli, findStaleHooks, runDoctor, runPrune } from "./index.js";
+import { runCli, findStaleHooks, runDoctor, runPrune, runSync } from "./index.js";
 import { markExtractionComplete } from "../core/extraction-lock.js";
 import { EventLog } from "../core/capture/log.js";
 
@@ -410,3 +410,45 @@ describe("dev-memo prune", () => {
     expect(res.stdout).toContain("Run the stdio Model Context Protocol (MCP) server");
   });
 });
+
+describe("dev-memo sync", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "dm-cli-sync-"));
+    initGitRepo(dir);
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("syncs graph via runCli and formats output", async () => {
+    const store = new GraphStore({ projectRoot: dir });
+    store.createNode({
+      type: "Decision",
+      title: "Use ESM modules",
+      content: "All source files are ESM",
+      lifecycle_state: "active",
+      evidence: { ...BASE_EVIDENCE, files: ["package.json"] },
+    });
+    store.close();
+
+    const res = await runCli(["sync"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(res.stderr).toBe("");
+    expect(res.stdout).toBe("Synced .dev-mem/shared.jsonl (imported: 0, updated: 0, exported: 1 active/verified nodes).\n");
+
+    const sharedContent = readFileSync(join(dir, ".dev-mem", "shared.jsonl"), "utf8");
+    expect(sharedContent).toContain("Use ESM modules");
+  });
+
+  it("exports runSync function", () => {
+    const result = runSync(dir);
+    expect(result).toEqual({ importedNodes: 0, updatedNodes: 0, exportedNodes: 0 });
+  });
+
+  it("includes sync in help text", async () => {
+    const res = await runCli(["--help"]);
+    expect(res.stdout).toContain("sync");
+    expect(res.stdout).toContain("Sync active/verified nodes with git-friendly .dev-mem/shared.jsonl");
+  });
+});

@@ -10,6 +10,7 @@ const COMMANDS = [
   "wrap",
   "doctor",
   "prune",
+  "sync",
   "mcp",
 ] as const;
 
@@ -31,10 +32,16 @@ import { retrieveContext, generateInjectionString } from "../core/retrieval/inde
 import { buildResolverSource, HOOK_MARKER } from "./hook-resolver.js";
 import { resolveProviderForProject } from "../core/llm/index.js";
 import { pruneExtractedEvents } from "../core/capture/compact.js";
+import { syncSharedGraph } from "../core/sync/index.js";
 
 export function runPrune(cwd: string): { removedEvents: number; keptEvents: number } {
   return pruneExtractedEvents(cwd);
 }
+
+export function runSync(cwd: string): { importedNodes: number; updatedNodes: number; exportedNodes: number } {
+  return syncSharedGraph(cwd);
+}
+
 
 function adapterHook(adapter: "claude-code" | "codex" | "cursor"): string {
   return `${buildResolverSource()}
@@ -683,6 +690,7 @@ function helpText(): string {
     "  inspect <node-id>    Show full details of a graph node",
     "  extract <sessionId>  Run knowledge extraction for a session",
     "  prune                Remove events from already-extracted sessions from events.jsonl",
+    "  sync                 Sync active/verified nodes with git-friendly .dev-mem/shared.jsonl",
     "  wrap <command...>    Run a command, then flush captured events",
     "  mcp                  Run the stdio Model Context Protocol (MCP) server",
     "  uninstall [--purge]  Remove hooks (--purge also deletes .dev-mem/)",
@@ -862,6 +870,13 @@ export async function runCli(
       return {
         exitCode: 0,
         stdout: `Pruned ${removedEvents} extracted event(s); ${keptEvents} active event(s) kept.\n`,
+        stderr: "",
+      };
+    } else if (command === "sync") {
+      const res = runSync(cwd);
+      return {
+        exitCode: 0,
+        stdout: `Synced .dev-mem/shared.jsonl (imported: ${res.importedNodes}, updated: ${res.updatedNodes}, exported: ${res.exportedNodes} active/verified nodes).\n`,
         stderr: "",
       };
     } else if (command === "mcp") {

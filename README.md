@@ -201,6 +201,29 @@ Extraction also runs `prune` automatically after every successful session extrac
 
 ---
 
+### `dev-memo sync`
+
+Bidirectionally syncs local curated engineering memory (`active` and `verified` nodes) with the git-friendly `.dev-mem/shared.jsonl` file.
+
+```bash
+dev-memo sync
+```
+
+Example output:
+```
+Synced .dev-mem/shared.jsonl (imported: 2, updated: 1, exported: 5 active/verified nodes).
+```
+
+#### Team Knowledge Sharing via Git
+
+While Dev-Mem's internal SQLite database (`.dev-mem/graph.sqlite`) and raw event logs (`.dev-mem/events.jsonl`) remain strictly machine-local and gitignored (`.dev-mem/*`), `.dev-mem/shared.jsonl` is explicitly un-ignored (`!.dev-mem/shared.jsonl`). Teams share curated architectural decisions, conventions, constraints, and failure warnings simply by committing `.dev-mem/shared.jsonl` into git:
+
+1. **Deterministic line format:** Records are sorted deterministically by ID, ensuring clean, merge-friendly git diffs with zero line jitter.
+2. **Noise isolation:** Scratch observations (`observed` state) stay local; only confirmed (`active` or `verified`) knowledge is exported.
+3. **Automatic session-start import:** When teammates pull git changes (`git pull`), Dev-Mem automatically imports incoming nodes into their local SQLite store on the next agent `SessionStart`.
+
+---
+
 ### `dev-memo query "<text>"`
 
 Manually runs retrieval for a given task description and prints the context a session would receive. Useful for debugging what's in the graph or checking that extraction captured something correctly.
@@ -420,7 +443,7 @@ Each item includes confidence and recency so the agent can weight trust appropri
 
 **No automatic repair of corrupted local state.** If `.dev-mem/graph.sqlite` or `.dev-mem/events.jsonl` becomes corrupted (e.g. due to a crash mid-write or a full disk), Dev-Mem logs the failure and no-ops rather than attempting repair. To recover: delete the `.dev-mem/` directory and run `npx dev-memo install` again. You will lose accumulated graph state. There is no automatic backup.
 
-**Single machine, local only.** `.dev-mem/` is gitignored by default. If you work across multiple machines or want to share knowledge graph state across a team, you would need to opt `.dev-mem/` into version control (`git add -f .dev-mem/` or remove it from `.gitignore`). There is no sync mechanism built in.
+**Team sharing via Git.** Dev-Mem keeps machine-specific SQLite files and event logs local (`.dev-mem/*` is gitignored), but allows team memory synchronization through `.dev-mem/shared.jsonl` (which is explicitly un-ignored). Teams share verified and active architectural decisions, conventions, and constraints by running `dev-memo sync` and committing `.dev-mem/shared.jsonl` to version control. Teammates receive updates automatically on their next agent `SessionStart`.
 
 
 

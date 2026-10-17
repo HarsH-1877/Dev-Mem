@@ -5,7 +5,8 @@ import { join } from "node:path";
 export const DEV_MEM_DIR = ".dev-mem";
 export const GRAPH_DB_FILENAME = "graph.sqlite";
 export const EVENTS_LOG_FILENAME = "events.jsonl";
-export const GITIGNORE_ENTRY = ".dev-mem/";
+export const SHARED_GRAPH_FILENAME = "shared.jsonl";
+export const GITIGNORE_ENTRY = ".dev-mem/*\n!.dev-mem/shared.jsonl";
 
 export function getDevMemDir(projectRoot: string): string {
   return join(projectRoot, DEV_MEM_DIR);
@@ -17,6 +18,10 @@ export function getGraphDbPath(projectRoot: string): string {
 
 export function getEventsLogPath(projectRoot: string): string {
   return join(getDevMemDir(projectRoot), EVENTS_LOG_FILENAME);
+}
+
+export function getSharedGraphPath(projectRoot: string): string {
+  return join(getDevMemDir(projectRoot), SHARED_GRAPH_FILENAME);
 }
 
 /**
@@ -39,13 +44,32 @@ export function ensureDevMemGitignore(projectRoot: string): void {
 
   const current = readFileSync(gitignorePath, "utf8");
   const lines = current.split(/\r?\n/);
-  const alreadyIgnored = lines.some(
-    (line) => line.trim() === GITIGNORE_ENTRY || line.trim() === DEV_MEM_DIR,
+
+  // If already allowing shared.jsonl with wildcard ignore, we are done
+  const hasWildcard = lines.some((line) => line.trim() === ".dev-mem/*");
+  const hasUnignore = lines.some((line) => line.trim() === "!.dev-mem/shared.jsonl");
+  if (hasWildcard && hasUnignore) {
+    return;
+  }
+
+  // If old-style .dev-mem/ or .dev-mem exists, replace it so shared.jsonl can be committed
+  const hasOldStyle = lines.some(
+    (line) => line.trim() === ".dev-mem/" || line.trim() === ".dev-mem",
   );
-  if (alreadyIgnored) {
+
+  if (hasOldStyle) {
+    const newLines = lines.flatMap((line) => {
+      const trimmed = line.trim();
+      if (trimmed === ".dev-mem/" || trimmed === ".dev-mem") {
+        return [".dev-mem/*", "!.dev-mem/shared.jsonl"];
+      }
+      return [line];
+    });
+    writeFileSync(gitignorePath, newLines.join("\n") + (current.endsWith("\n") ? "\n" : ""), "utf8");
     return;
   }
 
   const suffix = current.endsWith("\n") || current.length === 0 ? "" : "\n";
   writeFileSync(gitignorePath, `${current}${suffix}${GITIGNORE_ENTRY}\n`, "utf8");
 }
+

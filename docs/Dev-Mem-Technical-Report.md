@@ -26,6 +26,7 @@
    - 6.7 Knowledge Lifecycle State Machine
    - 6.8 LLM Provider Abstraction
    - 6.9 Zero-Daemon Model Context Protocol (MCP) Server
+   - 6.10 Git-Friendly Team Memory Sync (`.dev-mem/shared.jsonl`)
 7. [Agent Adapters](#7-agent-adapters)
 8. [CLI Interface](#8-cli-interface)
 9. [Evaluation Methodology & Results](#9-evaluation-methodology--results)
@@ -304,6 +305,8 @@ dev-mem/
 │   │   └── gemini.ts          # Google Gemini provider (native fetch)
 │   ├── mcp/
 │   │   └── server.ts          # Zero-daemon stdio MCP server (JSON-RPC 2.0)
+│   ├── sync/
+│   │   └── index.ts           # Git-friendly team memory sync (.dev-mem/shared.jsonl)
 │   ├── local-data.ts          # .dev-mem/ directory management
 │   └── extraction-lock.ts     # Per-session extraction lock (prevents duplicates)
 ├── adapters/
@@ -1025,6 +1028,47 @@ The server adheres to the standard Model Context Protocol (2024-11-05 revision):
 | `dev_mem_check_regression` | Active failure regression guard | `files` (string[], required): Relative file paths about to be touched. | Runs `checkRegressionRisk()` against active `FailedApproach` nodes (confidence $\ge 0.50$). Returns formatted warning block or clean status. |
 | `dev_mem_remember` | Zero-LLM direct knowledge recording | `type` (enum, required): Node type.<br>`title` (string, required): Summary statement.<br>`content` (string, required): Rationale.<br>`files` (string[], required): Grounded paths.<br>`symbols` (string[], optional): Identifier names. | Scrubs secrets with `sanitizeText()`, collects current HEAD git commit, records node directly to graph in `active` state (confidence 0.95), and returns node ID. Zero LLM cost. |
 | `dev_mem_resolve` | Explicit lifecycle state transitions | `node_id` (string, required): Target UUID.<br>`to_state` (enum, required): `superseded`, `stale`, `active`, `verified`. | Transitions node state via `GraphStore.transitionLifecycleState()`, validating allowed transitions and updating lifecycle history. |
+
+---
+
+### 6.10 Git-Friendly Team Memory Sync (`.dev-mem/shared.jsonl`)
+
+**Location:** `core/sync/index.ts`  
+**CLI Command:** `dev-memo sync`  
+**Shared File:** `.dev-mem/shared.jsonl`
+
+#### 6.10.1 Problem & Architectural Strategy
+A major challenge for local-first engineering memory is team-wide distribution. While a local relational store (`graph.sqlite`) provides high-speed indexed lookups, recursive CTE graph walks, and atomic ACID transactions, raw binary SQLite files cannot be merged through Git:
+- Committing SQLite databases leads to irreconcilable binary merge conflicts.
+- Concurrent development branches create divergent SQLite files that cannot be reconciled without complex custom database merging tools.
+- Fast-moving scratch data (`observed` turn-by-turn notes) creates noise and churn if committed to repository history.
+
+Dev-Mem solves this through a **hybrid storage architecture**:
+1. **Local-first execution:** Real-time capture, turn scoring, and active regression checking execute against `.dev-mem/graph.sqlite`. The database file and raw session logs remain machine-local and gitignored (`.dev-mem/*`).
+2. **Git-friendly interchange:** Curated, verified knowledge is exported into `.dev-mem/shared.jsonl`, which is explicitly exempt from gitignoring (`!.dev-mem/shared.jsonl`). Teams synchronize shared memory using standard Git workflows (`git commit`, `git push`, `git pull`).
+
+#### 6.10.2 Deterministic Line Format & Merge Safety
+To prevent merge conflicts during concurrent team branches, `exportSharedGraph()` enforces strict deterministic serialization:
+1. **Curated Filtering:** Only nodes with lifecycle state `active` or `verified` are exported. Local `observed` scratch notes, as well as `superseded` or `stale` records, are filtered out to prevent repository noise.
+2. **Deterministic Node Sorting:** Exported nodes are sorted lexicographically by node ID (`a.id.localeCompare(b.id)`).
+3. **Connecting Edge Isolation:** Only edges connecting two exported shareable nodes are included (`nodeIdSet.has(from_id) && nodeIdSet.has(to_id)`), sorted lexicographically by edge ID (`a.id.localeCompare(b.id)`).
+4. **Independent JSONL Records:** Each node and edge is written as a discrete, self-contained JSON line:
+   - `{"record_type":"node","node":{...}}`
+   - `{"record_type":"edge","edge":{...}}`
+
+Because each record occupies exactly one line and entries are deterministically sorted, Git treats entries as independent additions and deletions. Standard Git line merge algorithms resolve branch merges cleanly without artificial conflicts.
+
+#### 6.10.3 Lifecycle Promotion on Import
+When importing `.dev-mem/shared.jsonl` via `importSharedGraph()`:
+- **New Records:** Any node or connecting edge not currently present in the local SQLite graph is inserted directly.
+- **State Promotion:** If a node exists locally in `observed` state, but the incoming shared record contains the same node in `active` or `verified` state, Dev-Mem automatically executes a lifecycle transition to promote the local node.
+- **Fault-Tolerant Parsing:** Any malformed JSON lines or incomplete records are silently skipped, preventing corrupted Git merge artifacts from breaking local store initialization.
+
+#### 6.10.4 Automatic Session-Start Import
+To eliminate manual coordination overhead, Dev-Mem integrates shared graph synchronization directly into the agent lifecycle:
+- On `SessionStart` (e.g., in `adapters/claude-code/hook.ts`), Dev-Mem invokes `importSharedGraph(projectRoot)` inside a non-blocking `try/catch` block immediately before context retrieval and regression checking.
+- When a developer runs `git pull`, any updated conventions, architectural decisions, and failure learnings committed by teammates become instantly accessible to their local coding agent in the very next turn.
+- Developers can also trigger bidirectional synchronization explicitly at any time using `dev-memo sync`, which first ingests incoming changes from `shared.jsonl` and then flushes local verified knowledge back out.
 
 ---
 

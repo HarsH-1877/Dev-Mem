@@ -30,6 +30,12 @@ async function main() {
         capture.startSession();
         // Re-trigger extraction for earlier sessions that failed or never ran (bounded, never throws).
         retryPendingExtractions(projectRoot, payload.session_id);
+
+        try {
+          const { importSharedGraph } = await import("../../core/sync/index.js");
+          importSharedGraph(projectRoot);
+        } catch {}
+
         const gitSnap = capture.captureGit();
 
         const { retrieveContext, generateInjectionString } = await import("../../core/retrieval/index.js");

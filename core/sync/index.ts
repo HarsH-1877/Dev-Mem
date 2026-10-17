@@ -4,17 +4,17 @@ import { ensureLocalDataDir, getSharedGraphPath, SHARED_GRAPH_FILENAME } from ".
 
 export { SHARED_GRAPH_FILENAME, getSharedGraphPath };
 
-interface SharedNodeRecord {
+export interface SharedNodeRecord {
   record_type: "node";
   node: KnowledgeNode;
 }
 
-interface SharedEdgeRecord {
+export interface SharedEdgeRecord {
   record_type: "edge";
   edge: KnowledgeEdge;
 }
 
-type SharedRecord = SharedNodeRecord | SharedEdgeRecord;
+export type SharedRecord = SharedNodeRecord | SharedEdgeRecord;
 
 /**
  * Exports all curated (`active` and `verified`) knowledge nodes and their

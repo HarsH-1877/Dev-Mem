@@ -5,7 +5,7 @@ import { checkRegressionRisk, formatRegressionWarning } from "../regression/inde
 import { collectGitSnapshot } from "../capture/git.js";
 import { sanitizeText } from "../capture/sanitize.js";
 
-const MCP_TOOLS = [
+export const MCP_TOOLS = [
   {
     name: "dev_mem_query",
     description: "Search project engineering memory (decisions, failed approaches, constraints, conventions, discoveries, open issues) for context relevant to a task or files.",

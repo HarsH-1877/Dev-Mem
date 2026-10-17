@@ -59,9 +59,9 @@ dev-memo install cursor
 
 | Agent Requested / Detected | What it installs |
 |---|---|
-| `claude-code` (or nothing found) | Claude Code hooks into `.claude/settings.json` and `.claude/hooks/` |
-| `codex` | Codex hooks into `.codex/hooks.json` and `.codex/hooks/` |
-| `cursor` | Cursor hooks into `.cursor/hooks.json` and `.cursor/hooks/` |
+| `claude-code` (or nothing found) | Claude Code hooks into `.claude/settings.json` and `.claude/hooks/` (SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd) |
+| `codex` | Codex hooks into `.codex/hooks.json` and `.codex/hooks/` (SessionStart, PreToolUse, PostToolUse, Stop, SessionEnd) |
+| `cursor` | Cursor hooks into `.cursor/hooks.json` and `.cursor/hooks/` (SessionStart, PreToolUse, PostToolUse, Stop) |
 | `opencode` | OpenCode plugin into `.opencode/plugins/dev-mem.ts` and `opencode.json` |
 
 If multiple agent directories exist, hooks are installed for all of them.
@@ -86,9 +86,9 @@ Dev-Mem also creates `.dev-mem/` at the project root (gitignored by default) and
 
 **Reinstalling:** running `npx dev-memo install` again is safe — it won't duplicate hooks if they're already present.
 
-### Upgrading from 0.2.x
+### Upgrading to 0.4.0
 
-Hook scripts changed format. After upgrading, run `dev-memo install` once in each project. `dev-memo status` warns you if old hooks are still present. Upgraded hooks contain no machine-specific paths and are safe to commit for your whole team.
+After upgrading, run `dev-memo install` once in each project to register the new `UserPromptSubmit` prompt-time injection hook for Claude Code. Run `dev-memo sync` to initialize `.dev-mem/shared.jsonl` if you want to share curated project decisions and conventions with your team via Git. Upgraded hooks contain no machine-specific paths and are safe to commit for your whole team.
 
 ---
 

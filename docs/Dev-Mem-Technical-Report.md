@@ -1166,6 +1166,8 @@ Hooks are **best-effort observers** and must never terminate or disrupt the host
 | `dev-memo inspect <node-id>` | Full detail of a single node | `dev-memo inspect c4a1e9b2-...` |
 | `dev-memo extract <session>` | Manually trigger extraction | `dev-memo extract sess_001` |
 | `dev-memo prune` | Remove events from already-extracted sessions in `events.jsonl` | `dev-memo prune` |
+| `dev-memo sync` | Bidirectionally sync active/verified nodes with `.dev-mem/shared.jsonl` | `dev-memo sync` |
+| `dev-memo mcp` | Launch zero-daemon stdio Model Context Protocol (MCP) server | `dev-memo mcp` |
 | `dev-memo wrap <cmd> [args]` | Run a command and flush events on exit | `dev-memo wrap cursor-agent` |
 | `dev-memo uninstall [--purge]` | Remove hooks; `--purge` deletes `.dev-mem/` | `dev-memo uninstall --purge` |
 
@@ -1186,6 +1188,16 @@ Lifecycle States:
 - observed: 2
 
 Last capture: 2026-09-30T15:20:14.120Z
+```
+
+**`dev-memo prune`:**
+```
+Pruned 42 extracted event(s); 12 active event(s) kept.
+```
+
+**`dev-memo sync`:**
+```
+Synced .dev-mem/shared.jsonl (imported: 2, updated: 1, exported: 5 active/verified nodes).
 ```
 
 **`dev-memo inspect <node-id>`:**

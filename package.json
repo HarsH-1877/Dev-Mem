@@ -1,6 +1,6 @@
 {
   "name": "dev-memo",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Shared, verified development state for AI coding agents — preserves decisions, failed approaches, and discoveries across sessions and agent switches",
   "license": "MIT",
   "type": "module",
@@ -15,7 +15,9 @@
     "./extraction": "./dist/core/extraction/index.js",
     "./retrieval": "./dist/core/retrieval/index.js",
     "./regression": "./dist/core/regression/index.js",
-    "./consistency": "./dist/core/consistency/index.js"
+    "./consistency": "./dist/core/consistency/index.js",
+    "./mcp": "./dist/core/mcp/server.js",
+    "./sync": "./dist/core/sync/index.js"
   },
   "files": [
     "dist/cli",

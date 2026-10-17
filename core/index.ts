@@ -26,3 +26,23 @@ export {
   type ExtractionOptions,
   type ExtractionResult,
 } from "./extraction/index.js";
+export { sanitizeText, sanitizeEvent } from "./capture/sanitize.js";
+export {
+  compactSessionEventsForPrompt,
+  pruneExtractedEvents,
+} from "./capture/compact.js";
+export {
+  handleMcpRequest,
+  startMcpStdioServer,
+  MCP_TOOLS,
+} from "./mcp/server.js";
+export {
+  exportSharedGraph,
+  importSharedGraph,
+  syncSharedGraph,
+  SHARED_GRAPH_FILENAME,
+  getSharedGraphPath,
+  type SharedNodeRecord,
+  type SharedEdgeRecord,
+  type SharedRecord,
+} from "./sync/index.js";

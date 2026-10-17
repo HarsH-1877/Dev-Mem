@@ -403,4 +403,10 @@ describe("dev-memo prune", () => {
     expect(res.stdout).toContain("prune");
     expect(res.stdout).toContain("Remove events from already-extracted sessions");
   });
+
+  it("includes mcp in help text", async () => {
+    const res = await runCli(["--help"]);
+    expect(res.stdout).toContain("mcp");
+    expect(res.stdout).toContain("Run the stdio Model Context Protocol (MCP) server");
+  });
 });

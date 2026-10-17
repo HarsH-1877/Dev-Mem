@@ -10,6 +10,7 @@ const COMMANDS = [
   "wrap",
   "doctor",
   "prune",
+  "mcp",
 ] as const;
 
 type Command = (typeof COMMANDS)[number];
@@ -683,6 +684,7 @@ function helpText(): string {
     "  extract <sessionId>  Run knowledge extraction for a session",
     "  prune                Remove events from already-extracted sessions from events.jsonl",
     "  wrap <command...>    Run a command, then flush captured events",
+    "  mcp                  Run the stdio Model Context Protocol (MCP) server",
     "  uninstall [--purge]  Remove hooks (--purge also deletes .dev-mem/)",
     "",
     "Options:",
@@ -862,6 +864,10 @@ export async function runCli(
         stdout: `Pruned ${removedEvents} extracted event(s); ${keptEvents} active event(s) kept.\n`,
         stderr: "",
       };
+    } else if (command === "mcp") {
+      const { startMcpStdioServer } = await import("../core/mcp/server.js");
+      await startMcpStdioServer(cwd);
+      return { exitCode: 0, stdout: "", stderr: "" };
     }
   } catch (e: any) {
     return { exitCode: 1, stdout: "", stderr: e.message + "\n" };

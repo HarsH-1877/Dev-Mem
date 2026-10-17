@@ -25,6 +25,7 @@
    - 6.6 Consistency Checks
    - 6.7 Knowledge Lifecycle State Machine
    - 6.8 LLM Provider Abstraction
+   - 6.9 Zero-Daemon Model Context Protocol (MCP) Server
 7. [Agent Adapters](#7-agent-adapters)
 8. [CLI Interface](#8-cli-interface)
 9. [Evaluation Methodology & Results](#9-evaluation-methodology--results)
@@ -301,6 +302,8 @@ dev-mem/
 │   │   ├── anthropic.ts       # Anthropic Claude provider (native fetch)
 │   │   ├── openai.ts          # OpenAI/OpenAI-compatible provider (native fetch)
 │   │   └── gemini.ts          # Google Gemini provider (native fetch)
+│   ├── mcp/
+│   │   └── server.ts          # Zero-daemon stdio MCP server (JSON-RPC 2.0)
 │   ├── local-data.ts          # .dev-mem/ directory management
 │   └── extraction-lock.ts     # Per-session extraction lock (prevents duplicates)
 ├── adapters/
@@ -962,6 +965,66 @@ Provider resolution follows a strict priority order (first match wins):
 5. `OPENAI_API_KEY` env var
 6. `GEMINI_API_KEY` or `GOOGLE_API_KEY` env var
 7. `.dev-mem/config.yml` file settings (lowest priority)
+
+---
+
+### 6.9 Zero-Daemon Model Context Protocol (MCP) Server
+
+**Location:** `core/mcp/server.ts`
+
+In v0.4.0, Dev-Mem introduces first-class support for the Model Context Protocol (MCP), providing standard tool interfaces over `stdio` so that any MCP-compliant client (Claude Desktop, Claude Code, Cursor, OpenCode, Codex) can search, record, verify, and resolve engineering memory directly.
+
+#### 6.9.1 Zero-Daemon Architecture
+
+Traditional MCP servers frequently operate as resident HTTP or WebSocket daemons, requiring background process managers, port allocations, and periodic health checks. In contrast, Dev-Mem's MCP implementation is strictly **zero-daemon**:
+
+- **Subprocess / Stdio Pipe:** The client spawns `dev-memo mcp` on demand as a direct child process. All communication flows through newline-delimited JSON-RPC 2.0 messages over standard input and output (`stdio`).
+- **Zero Open Ports:** No HTTP, WebSocket, or TCP ports are opened. This completely eliminates port collisions, local network security surfaces, and firewall authorization alerts.
+- **Zero Idle Resource Consumption:** When the client disconnects or exits, the process closes immediately. There are no dangling daemons or persistent background workers consuming memory.
+- **Direct Concurrency via SQLite WAL:** The server operates directly on `.dev-mem/graph.sqlite` using SQLite's Write-Ahead Logging (WAL) mode and a 5000ms busy timeout. MCP queries and mutations seamlessly coexist with background extraction or concurrent CLI commands without lock contention.
+
+```
+┌────────────────────────────────────────────────────────┐
+│   MCP Client (Claude Desktop / Cursor / OpenCode)      │
+└──────────────────────────┬─────────────────────────────┘
+                           │ stdio (JSON-RPC 2.0)
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│   dev-memo mcp (core/mcp/server.ts)                    │
+│   - handleMcpRequest()                                 │
+│   - sanitizeText() scrubbing                           │
+│   - Git snapshot collection                            │
+└────────────┬─────────────┬─────────────┬───────────────┘
+             │             │             │
+    dev_mem_query   dev_mem_check   dev_mem_remember /
+             │      _regression      dev_mem_resolve
+             │             │             │
+             ▼             ▼             ▼
+┌────────────────────────────────────────────────────────┐
+│   .dev-mem/graph.sqlite (WAL Mode)                     │
+└────────────────────────────────────────────────────────┘
+```
+
+#### 6.9.2 Protocol Lifecycle
+
+The server adheres to the standard Model Context Protocol (2024-11-05 revision):
+
+1. **`initialize`:** Returns server capabilities (`tools: {}`), protocol version (`2024-11-05`), and server identity (`name: "dev-memo"`, `version: "0.4.0"`).
+2. **`ping`:** Returns empty result object confirming pipe liveness.
+3. **`notifications/*`:** Handled as one-way notifications without response payloads.
+4. **`tools/list`:** Returns JSON schemas for all available tools.
+5. **`tools/call`:** Invokes the target tool and formats the response according to MCP conventions (`content: [{ type: "text", text: ... }]` with `isError: true` on exceptions).
+
+#### 6.9.3 Tool Schemas & Functionality
+
+`dev-memo mcp` exposes four deterministic tools:
+
+| Tool | Purpose | Schema & Parameters | Output & Behavior |
+|---|---|---|---|
+| `dev_mem_query` | Dynamic context retrieval | `query` (string, required): Task description or topic.<br>`files` (string[], optional): Files in scope. | Runs `retrieveContext()` with budget-constrained relevance scoring and returns formatted knowledge nodes (`[type] (id, state, score)`). |
+| `dev_mem_check_regression` | Active failure regression guard | `files` (string[], required): Relative file paths about to be touched. | Runs `checkRegressionRisk()` against active `FailedApproach` nodes (confidence $\ge 0.50$). Returns formatted warning block or clean status. |
+| `dev_mem_remember` | Zero-LLM direct knowledge recording | `type` (enum, required): Node type.<br>`title` (string, required): Summary statement.<br>`content` (string, required): Rationale.<br>`files` (string[], required): Grounded paths.<br>`symbols` (string[], optional): Identifier names. | Scrubs secrets with `sanitizeText()`, collects current HEAD git commit, records node directly to graph in `active` state (confidence 0.95), and returns node ID. Zero LLM cost. |
+| `dev_mem_resolve` | Explicit lifecycle state transitions | `node_id` (string, required): Target UUID.<br>`to_state` (enum, required): `superseded`, `stale`, `active`, `verified`. | Transitions node state via `GraphStore.transitionLifecycleState()`, validating allowed transitions and updating lifecycle history. |
 
 ---
 

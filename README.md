@@ -267,6 +267,94 @@ Returns exit code 1 with `Node not found: <id>` if the ID doesn't exist.
 
 ---
 
+### `dev-memo mcp`
+
+Runs a zero-daemon Model Context Protocol (MCP) server communicating via standard JSON-RPC 2.0 over `stdio`. It exposes Dev-Mem's local SQLite engineering memory and active regression protection directly as native MCP tools to any compliant client.
+
+#### Zero-Daemon Architecture
+Unlike traditional MCP servers that require long-running background services or open localhost HTTP/WebSocket ports, `dev-memo mcp`:
+- Requires **zero background daemons** and **zero open ports**.
+- Is spawned on-demand by your IDE or agent as a child process.
+- Communicates directly over standard input/output (`stdio`) and terminates cleanly when the client disconnects.
+- Operates directly against the project's local `.dev-mem/graph.sqlite`.
+
+#### Exposed Tools
+
+| Tool | Purpose | Key Arguments |
+|---|---|---|
+| `dev_mem_query` | Search project engineering memory (decisions, failed approaches, constraints, conventions, discoveries, open issues) for relevant context. | `query` (string, required), `files` (string[], optional) |
+| `dev_mem_check_regression` | Pre-flight check: detects if files about to be modified overlap with known `FailedApproach` nodes in project history. | `files` (string[], required) |
+| `dev_mem_remember` | Directly record durable engineering knowledge into the local graph with zero LLM cost. | `type` (Decision, FailedApproach, Constraint, Discovery, Convention, OpenIssue), `title`, `content`, `files`, `symbols` (optional) |
+| `dev_mem_resolve` | Transition an existing node (such as a fixed `OpenIssue` or replaced `Decision`) to `superseded` or `stale`. | `node_id` (string, required), `to_state` (`superseded` \| `stale` \| `active` \| `verified`) |
+
+#### Client Configuration
+
+##### 1. Claude Desktop
+Add to your `claude_desktop_config.json` (on macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`, on Windows: `%APPDATA%\Claude\claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "dev-memo": {
+      "command": "npx",
+      "args": ["-y", "dev-memo", "mcp"],
+      "cwd": "/path/to/your/project"
+    }
+  }
+}
+```
+
+##### 2. Claude Code
+Register `dev-memo` via the Claude Code CLI:
+```bash
+claude mcp add dev-memo -- npx -y dev-memo mcp
+```
+Or add to your `.claude.json` / settings:
+```json
+{
+  "mcpServers": {
+    "dev-memo": {
+      "command": "npx",
+      "args": ["-y", "dev-memo", "mcp"]
+    }
+  }
+}
+```
+
+##### 3. Cursor
+In Cursor Settings $\rightarrow$ Features $\rightarrow$ MCP Servers $\rightarrow$ "Add New MCP Server":
+- **Name:** `dev-memo`
+- **Type:** `command`
+- **Command:** `npx -y dev-memo mcp`
+
+Or in `.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "dev-memo": {
+      "command": "npx",
+      "args": ["-y", "dev-memo", "mcp"]
+    }
+  }
+}
+```
+
+##### 4. OpenCode
+In your `opencode.json`:
+```json
+{
+  "mcp": {
+    "servers": {
+      "dev-memo": {
+        "command": "npx",
+        "args": ["-y", "dev-memo", "mcp"]
+      }
+    }
+  }
+}
+```
+
+---
+
 ## Configuration
 
 Create `.dev-mem/config.yml` at the project root to override defaults.

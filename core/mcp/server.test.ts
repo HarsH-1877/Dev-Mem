@@ -170,8 +170,12 @@ describe("Zero-Daemon MCP Server (stdio JSON-RPC)", () => {
   });
 
   it("communicates via stdio JSON-RPC when running dev-memo mcp", async () => {
-    const { spawn } = await import("node:child_process");
+    const { spawn, execFileSync } = await import("node:child_process");
+    const { existsSync } = await import("node:fs");
     const cliPath = join(process.cwd(), "dist", "cli", "index.js");
+    if (!existsSync(cliPath)) {
+      execFileSync("npm", ["run", "build"], { stdio: "ignore", shell: true });
+    }
 
     const child = spawn(process.execPath, [cliPath, "mcp"], {
       cwd: dir,

@@ -184,6 +184,23 @@ If extraction is already running or has already completed for that session, it p
 
 ---
 
+### `dev-memo prune`
+
+Cleans `.dev-mem/events.jsonl` by removing recorded events belonging to sessions that have already completed extraction into the SQLite knowledge graph. Active and unextracted session events are preserved.
+
+```bash
+dev-memo prune
+```
+
+Example output:
+```
+Pruned 42 extracted event(s); 12 active event(s) kept.
+```
+
+Extraction also runs `prune` automatically after every successful session extraction to keep event logs compact and disk usage minimal.
+
+---
+
 ### `dev-memo query "<text>"`
 
 Manually runs retrieval for a given task description and prints the context a session would receive. Useful for debugging what's in the graph or checking that extraction captured something correctly.
@@ -281,9 +298,9 @@ Once hooks are installed, every agent session does this without any manual steps
 
 **At session start** — Dev-Mem reads the local graph, scores stored knowledge nodes against the current working-tree state (which files are modified, what the session title is), selects the highest-scoring nodes within the token budget, and injects them into the agent's context. If any stored `FailedApproach` nodes match files you're about to work on, a regression warning is injected first.
 
-**During the session** — Every tool call (file writes, shell commands) is recorded to `.dev-mem/events.jsonl`. For Claude Code and Codex, this includes both pre- and post-execution snapshots. For Cursor, post-execution only.
+**During the session** — Every tool call (file writes, shell commands) is recorded to `.dev-mem/events.jsonl`. All events are scrubbed before storage: API keys (Anthropic, OpenAI, Gemini, GitHub, AWS, Slack, Bearer tokens, `.env` credentials) and `<private>...</private>` tags are automatically redacted. For Claude Code and Codex, this includes both pre- and post-execution snapshots. For Cursor, post-execution only.
 
-**At session end (Claude Code, Codex)** — A single batched LLM call extracts typed knowledge nodes from the session's event log. Extracted nodes start in `observed` state. This call happens in a detached background process and doesn't block the agent.
+**At session end (Claude Code, Codex)** — Dev-Mem runs a deterministic compaction pass (stripping duplicate reads, collapsing consecutive status checks, and capping passing tool output) to reduce token overhead by 70–90%, followed by a single batched LLM call that extracts typed knowledge nodes from the session's compacted event log. Extracted nodes start in `observed` state. This call happens in a detached background process and doesn't block the agent.
 
 **After N tool calls (Cursor)** — Same extraction step, triggered mid-session every N completed tool calls (default 10) rather than at session end.
 
@@ -312,8 +329,6 @@ Each item includes confidence and recency so the agent can weight trust appropri
 **Cursor and OpenCode: no reliable session-end flush.** Cursor's `cursor-agent` CLI and OpenCode do not reliably fire a session-end event when the headless process exits. Dev-Mem compensates with turn-based checkpoints (extraction fires every 10 tool calls for Cursor, and on `session.idle` for OpenCode), but if a session ends abruptly, knowledge from that session is not extracted until the next checkpoint or until you run `dev-memo wrap`. The `dev-memo wrap <command> <args>` approach is the cleanest workaround.
 
 **No automatic repair of corrupted local state.** If `.dev-mem/graph.sqlite` or `.dev-mem/events.jsonl` becomes corrupted (e.g. due to a crash mid-write or a full disk), Dev-Mem logs the failure and no-ops rather than attempting repair. To recover: delete the `.dev-mem/` directory and run `npx dev-memo install` again. You will lose accumulated graph state. There is no automatic backup.
-
-**No symbol-level grounding.** Knowledge nodes are grounded to file paths and commit SHAs, not to specific functions or classes. If a referenced file changes substantially but isn't deleted, Dev-Mem won't detect that a node has gone stale. Staleness detection is currently existence-only: a node is marked stale when all its cited files are deleted, not when their contents change significantly.
 
 **Single machine, local only.** `.dev-mem/` is gitignored by default. If you work across multiple machines or want to share knowledge graph state across a team, you would need to opt `.dev-mem/` into version control (`git add -f .dev-mem/` or remove it from `.gitignore`). There is no sync mechanism built in.
 

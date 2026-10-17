@@ -29,9 +29,14 @@ export function filterUnseenNodes<T extends { id: string }>(
       }
     }
     const seenSet = new Set(seenIds);
-    const unseen = nodes.filter((n) => !seenSet.has(n.id));
+    const unseen: T[] = [];
+    for (const node of nodes) {
+      if (!seenSet.has(node.id)) {
+        seenSet.add(node.id);
+        unseen.push(node);
+      }
+    }
     if (unseen.length > 0) {
-      for (const n of unseen) seenSet.add(n.id);
       writeFileSync(path, JSON.stringify([...seenSet]), "utf8");
     }
     return unseen;

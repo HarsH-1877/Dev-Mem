@@ -253,6 +253,21 @@ describe("Git-friendly Team Memory Sync (.dev-mem/shared.jsonl)", () => {
     }
   });
 
+  it("safely ignores null or primitive values in shared.jsonl", () => {
+    const root = mkdtempSync(join(tmpdir(), "dm-sync-null-"));
+    try {
+      mkdirSync(join(root, ".dev-mem"), { recursive: true });
+      const sharedPath = getSharedGraphPath(root);
+      writeFileSync(sharedPath, "null\n42\n\"string\"\n{}\n", "utf8");
+      const result = importSharedGraph(root);
+      expect(result.importedNodes).toBe(0);
+      expect(result.updatedNodes).toBe(0);
+      expect(result.importedEdges).toBe(0);
+    } finally {
+      safeRm(root);
+    }
+  });
+
   it("ensureDevMemGitignore allows shared.jsonl to be committed while ignoring other .dev-mem files", () => {
     const root = mkdtempSync(join(tmpdir(), "dm-sync-gitignore-"));
     try {

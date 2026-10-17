@@ -93,6 +93,8 @@ export function importSharedGraph(projectRoot: string): {
         continue;
       }
 
+      if (!rec || typeof rec !== "object") continue;
+
       if (rec.record_type === "node" && rec.node?.id) {
         const existing = store.getNode(rec.node.id);
         if (!existing) {

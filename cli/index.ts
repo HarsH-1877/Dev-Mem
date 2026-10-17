@@ -9,6 +9,7 @@ const COMMANDS = [
   "extract",
   "wrap",
   "doctor",
+  "prune",
 ] as const;
 
 type Command = (typeof COMMANDS)[number];
@@ -28,6 +29,11 @@ import { acquireExtractionLock, markExtractionComplete } from "../core/extractio
 import { retrieveContext, generateInjectionString } from "../core/retrieval/index.js";
 import { buildResolverSource, HOOK_MARKER } from "./hook-resolver.js";
 import { resolveProviderForProject } from "../core/llm/index.js";
+import { pruneExtractedEvents } from "../core/capture/compact.js";
+
+export function runPrune(cwd: string): { removedEvents: number; keptEvents: number } {
+  return pruneExtractedEvents(cwd);
+}
 
 function adapterHook(adapter: "claude-code" | "codex" | "cursor"): string {
   return `${buildResolverSource()}
@@ -640,7 +646,10 @@ async function extractOnce(cwd: string, sessionId: string): Promise<{ skipped: b
   }
   try {
     const result = await runExtraction({ projectRoot: cwd, sessionId });
-    if (result.success) markExtractionComplete(cwd, sessionId);
+    if (result.success) {
+      markExtractionComplete(cwd, sessionId);
+      pruneExtractedEvents(cwd);
+    }
     return { skipped: false, success: result.success };
   } finally {
     release();
@@ -672,6 +681,7 @@ function helpText(): string {
     "  query \"<task>\"       Show context relevant to a task",
     "  inspect <node-id>    Show full details of a graph node",
     "  extract <sessionId>  Run knowledge extraction for a session",
+    "  prune                Remove events from already-extracted sessions from events.jsonl",
     "  wrap <command...>    Run a command, then flush captured events",
     "  uninstall [--purge]  Remove hooks (--purge also deletes .dev-mem/)",
     "",
@@ -845,6 +855,13 @@ export async function runCli(
         store.close();
       }
       return { exitCode: 0, stdout: out, stderr: "" };
+    } else if (command === "prune") {
+      const { removedEvents, keptEvents } = runPrune(cwd);
+      return {
+        exitCode: 0,
+        stdout: `Pruned ${removedEvents} extracted event(s); ${keptEvents} active event(s) kept.\n`,
+        stderr: "",
+      };
     }
   } catch (e: any) {
     return { exitCode: 1, stdout: "", stderr: e.message + "\n" };

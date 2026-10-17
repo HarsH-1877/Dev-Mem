@@ -1,5 +1,6 @@
 import { EventLog } from "../capture/log.js";
 import { collectGitSnapshot } from "../capture/git.js";
+import { compactSessionEventsForPrompt } from "../capture/compact.js";
 import { GraphStore } from "../graph/index.js";
 import type { CaptureEvent, FileTouchEvent, GitSnapshotEvent, ToolCallEvent } from "../capture/events.js";
 import type { CreateNodeInput, KnowledgeNode, NodeType } from "../graph/types.js";
@@ -128,6 +129,7 @@ export async function runExtraction(options: ExtractionOptions): Promise<Extract
     }
 
     // 3. Format prompt for single batched extraction pass
+    const compactedEvents = compactSessionEventsForPrompt(sessionEvents);
     const prompt = `You are an automated software architecture and memory extraction engine for coding agents.
 Analyze the following chronological development session events and extract key durable knowledge.
 
@@ -183,7 +185,7 @@ Output strictly a single valid JSON object with the following schema:
 }
 
 Session Log:
-${sessionEvents.map((e) => JSON.stringify(e)).join("\n")}
+${compactedEvents.map((e) => JSON.stringify(e)).join("\n")}
 `;
 
     // 4. LLM Call

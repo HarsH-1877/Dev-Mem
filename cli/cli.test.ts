@@ -11,7 +11,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { GraphStore } from "../core/graph/index.js";
-import { runCli, findStaleHooks, runDoctor } from "./index.js";
+import { runCli, findStaleHooks, runDoctor, runPrune } from "./index.js";
+import { markExtractionComplete } from "../core/extraction-lock.js";
+import { EventLog } from "../core/capture/log.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -356,5 +358,49 @@ describe("dev-memo doctor", () => {
     const r = await runCli(["doctor"], { cwd: dir });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain("✓ LLM provider: gemini");
+  });
+});
+
+describe("dev-memo prune", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "dm-cli-prune-"));
+    initGitRepo(dir);
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("prunes events for completed extractions via runCli", async () => {
+    const logPath = join(dir, ".dev-mem", "events.jsonl");
+    const log = new EventLog({ persistPath: logPath });
+    log.append({ type: "session_start", id: "1", timestamp: "t1", session_id: "done-sess", agent: "claude-code", project_root: dir });
+    log.append({ type: "session_start", id: "2", timestamp: "t2", session_id: "active-sess", agent: "claude-code", project_root: dir });
+
+    markExtractionComplete(dir, "done-sess");
+
+    const res = await runCli(["prune"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toBe("Pruned 1 extracted event(s); 1 active event(s) kept.\n");
+
+    const reloaded = new EventLog({ persistPath: logPath }).getEvents();
+    expect(reloaded.map((e) => e.session_id)).toEqual(["active-sess"]);
+  });
+
+  it("exports runPrune function", () => {
+    const logPath = join(dir, ".dev-mem", "events.jsonl");
+    const log = new EventLog({ persistPath: logPath });
+    log.append({ type: "session_start", id: "1", timestamp: "t1", session_id: "done-sess", agent: "claude-code", project_root: dir });
+
+    markExtractionComplete(dir, "done-sess");
+
+    const result = runPrune(dir);
+    expect(result).toEqual({ removedEvents: 1, keptEvents: 0 });
+  });
+
+  it("includes prune in help text", async () => {
+    const res = await runCli(["--help"]);
+    expect(res.stdout).toContain("prune");
+    expect(res.stdout).toContain("Remove events from already-extracted sessions");
   });
 });

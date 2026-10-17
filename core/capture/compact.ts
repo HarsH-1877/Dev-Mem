@@ -16,18 +16,20 @@ function truncate(text: string | undefined, max: number): string | undefined {
 
 function truncateDiff(diff: string | undefined): string {
   if (!diff) return "";
-  const lines = diff.split("\n");
+  let result = diff;
+  const lines = result.split("\n");
   if (lines.length > MAX_DIFF_LINES) {
-    return lines.slice(0, MAX_DIFF_LINES).join("\n") + "\n...[diff truncated at 500 lines]";
+    result = lines.slice(0, MAX_DIFF_LINES).join("\n") + "\n...[diff truncated at 500 lines]";
   }
-  if (diff.length > MAX_DIFF_BYTES) {
-    return diff.slice(0, MAX_DIFF_BYTES) + "...[diff truncated at 20KB]";
+  if (result.length > MAX_DIFF_BYTES) {
+    result = result.slice(0, MAX_DIFF_BYTES) + "...[diff truncated at 20KB]";
   }
-  return diff;
+  return result;
 }
 
 function getStatusKey(tc: ToolCallEvent): string | null {
-  const cmd = tc.command.toLowerCase().trim();
+  const cmd = tc.command?.toLowerCase()?.trim();
+  if (!cmd) return null;
   const firstArg = tc.args?.[0]?.toLowerCase()?.trim();
   if (cmd === "status" || cmd === "git status") {
     return `${cmd} ${(tc.args || []).join(" ")}`.trim();

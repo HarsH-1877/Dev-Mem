@@ -9,7 +9,7 @@ function parseInput(): ClaudeCodeHookInput | null {
   try {
     const inputStr = readFileSync(0, "utf-8");
     if (!inputStr) return null;
-    return parseHookPayload(inputStr, ["SessionStart", "PostToolUse", "Stop", "SessionEnd"], "claude-code") as ClaudeCodeHookInput | null;
+    return parseHookPayload(inputStr, ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"], "claude-code") as ClaudeCodeHookInput | null;
   } catch (e) {
     console.error(`[dev-mem/claude-code] Ignoring unreadable hook input: ${(e as Error).message}`);
     return null;
@@ -34,6 +34,7 @@ async function main() {
 
         const { retrieveContext, generateInjectionString } = await import("../../core/retrieval/index.js");
         const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
+        const { filterUnseenNodes } = await import("../../core/retrieval/session-dedup.js");
 
         // Files currently modified/staged in working tree (if any)
         const currentFiles = Array.isArray(gitSnap.status) ? gitSnap.status.map((s) => s.path) : [];
@@ -56,7 +57,8 @@ async function main() {
         // default (nodeCount × 18, clamped 80–2000) that creates real selection
         // pressure at any graph size without over-injecting on small graphs.
         const nodes = retrieveContext({ projectRoot, currentFiles, currentTask });
-        const contextBlock = generateInjectionString(nodes);
+        const unseenNodes = filterUnseenNodes(projectRoot, payload.session_id, nodes);
+        const contextBlock = generateInjectionString(unseenNodes);
 
         // Regression warning appears first — it is the most actionable signal
         const additionalContext = [regressionWarning, contextBlock]
@@ -66,6 +68,33 @@ async function main() {
         if (additionalContext) {
           console.log(JSON.stringify({
             hookSpecificOutput: { additionalContext }
+          }));
+        }
+        break;
+      }
+
+      case "UserPromptSubmit": {
+        const promptPayload = payload as import("./types.js").UserPromptSubmitInput;
+        const promptText = stringFor(promptPayload.prompt, "").trim();
+        if (!promptText) break;
+
+        const { retrieveContext, generateInjectionString } = await import("../../core/retrieval/index.js");
+        const { filterUnseenNodes } = await import("../../core/retrieval/session-dedup.js");
+
+        const candidates = retrieveContext({
+          projectRoot,
+          currentTask: promptText,
+        });
+        // Only inject nodes with meaningful topical relevance (> 0) that haven't been shown yet
+        const unseen = filterUnseenNodes(
+          projectRoot,
+          payload.session_id,
+          candidates.filter((n) => n.score > 0.35),
+        );
+        const contextBlock = generateInjectionString(unseen);
+        if (contextBlock) {
+          console.log(JSON.stringify({
+            hookSpecificOutput: { additionalContext: contextBlock }
           }));
         }
         break;

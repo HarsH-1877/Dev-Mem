@@ -114,7 +114,7 @@ function installClaudeCodeHooks(cwd: string) {
     mkdirSync(hooksDir, { recursive: true });
   }
 
-  const events = ["SessionStart", "PostToolUse", "Stop", "SessionEnd"];
+  const events = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"];
   const hookConfigs: Record<string, any[]> = {};
 
   for (const event of events) {
@@ -463,7 +463,7 @@ function uninstallHooks(cwd: string, purge: boolean) {
 
   const claudeHooksDir = join(claudeDir, "hooks");
   if (existsSync(claudeHooksDir)) {
-    const events = ["SessionStart", "PostToolUse", "Stop", "SessionEnd"];
+    const events = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"];
     for (const event of events) {
       const scriptName = `dev-mem-${event.toLowerCase().replace(/([A-Z])/g, '-$1').replace(/^-/, '')}.js`;
       const scriptPath = join(claudeHooksDir, scriptName);

@@ -38,9 +38,14 @@ export interface StopInput extends BaseHookInput {
   session_crons: Array<Record<string, any>>;
 }
 
+export interface UserPromptSubmitInput extends BaseHookInput {
+  hook_event_name: "UserPromptSubmit";
+  prompt?: string;
+}
+
 export interface SessionEndInput extends BaseHookInput {
   hook_event_name: "SessionEnd";
   reason: "clear" | "resume" | "logout" | "prompt_input_exit" | "other" | string;
 }
 
-export type ClaudeCodeHookInput = SessionStartInput | PostToolUseInput | StopInput | SessionEndInput;
+export type ClaudeCodeHookInput = SessionStartInput | UserPromptSubmitInput | PostToolUseInput | StopInput | SessionEndInput;

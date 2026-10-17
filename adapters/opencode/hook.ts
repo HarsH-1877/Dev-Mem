@@ -66,10 +66,18 @@ async function main() {
 
         const { retrieveContext, generateInjectionString } = await import("../../core/retrieval/index.js");
         const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
+        const { filterUnseenNodes } = await import("../../core/retrieval/session-dedup.js");
 
         const currentFiles = Array.isArray(gitSnap.status)
           ? gitSnap.status.map((s) => s.path)
           : [];
+
+        const currentTask =
+          typeof payload.message === "string"
+            ? payload.message
+            : payload.message
+              ? JSON.stringify(payload.message)
+              : undefined;
 
         const regressionMatches = checkRegressionRisk({
           projectRoot,
@@ -78,8 +86,13 @@ async function main() {
         });
         const regressionWarning = formatRegressionWarning(regressionMatches);
 
-        const nodes = retrieveContext({ projectRoot, currentFiles });
-        const contextBlock = generateInjectionString(nodes);
+        const nodes = retrieveContext({
+          projectRoot,
+          currentFiles,
+          currentTask: currentTask?.trim() || undefined,
+        });
+        const unseenNodes = filterUnseenNodes(projectRoot, payload.session_id, nodes);
+        const contextBlock = generateInjectionString(unseenNodes);
 
         const additionalContext = [regressionWarning, contextBlock]
           .filter(Boolean)

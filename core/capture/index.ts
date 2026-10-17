@@ -148,6 +148,7 @@ export class DeterministicCapture {
 
 export { collectGitSnapshot, parsePorcelain } from "./git.js";
 export { EventLog } from "./log.js";
+export { sanitizeText, sanitizeEvent } from "./sanitize.js";
 export type {
   CaptureEvent,
   FileTouchAction,

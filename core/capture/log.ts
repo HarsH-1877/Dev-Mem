@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CaptureEvent } from "./events.js";
+import { sanitizeEvent } from "./sanitize.js";
 
 /**
  * Append-only structured event log. Extraction (later milestone) will consume
@@ -32,7 +33,8 @@ export class EventLog {
     }
   }
 
-  append<T extends CaptureEvent>(event: T): T {
+  append<T extends CaptureEvent>(rawEvent: T): T {
+    const event = sanitizeEvent(rawEvent);
     this.events.push(event);
     if (this.persistPath) {
       mkdirSync(dirname(this.persistPath), { recursive: true });

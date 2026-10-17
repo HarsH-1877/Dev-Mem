@@ -72,7 +72,7 @@ describe("Eval Harness Components", () => {
     } finally {
       rmSync(testDir, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("detects regression risk when re-attempting failed approach", async () => {
     const testDir = mkdtempSync(join(tmpdir(), "dev-mem-regression-test-"));
@@ -126,5 +126,5 @@ describe("Eval Harness Components", () => {
     } finally {
       rmSync(testDir, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });

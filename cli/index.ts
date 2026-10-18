@@ -33,6 +33,7 @@ import { buildResolverSource, HOOK_MARKER } from "./hook-resolver.js";
 import { resolveProviderForProject } from "../core/llm/index.js";
 import { pruneExtractedEvents } from "../core/capture/compact.js";
 import { syncSharedGraph } from "../core/sync/index.js";
+import { getBanner } from "./banner.js";
 
 export function runPrune(cwd: string): { removedEvents: number; keptEvents: number } {
   return pruneExtractedEvents(cwd);
@@ -680,6 +681,8 @@ function readPackageVersion(): string {
 
 function helpText(): string {
   return [
+    getBanner(),
+    "",
     `Usage: dev-memo <${COMMANDS.join("|")}>`,
     "",
     "Commands:",
@@ -718,9 +721,9 @@ export async function runCli(
 
   if (!command) {
     return {
-      exitCode: 1,
-      stdout: "",
-      stderr: `Usage: dev-memo <${COMMANDS.join("|")}>\n`,
+      exitCode: 0,
+      stdout: helpText(),
+      stderr: "",
     };
   }
 
@@ -737,7 +740,7 @@ export async function runCli(
   try {
     if (command === "install") {
       const { installedAgents: agents, defaultedToClaude } = installHooks(cwd, args);
-      let out = `dev-memo hooks installed (agents: ${agents.join(", ")})\n`;
+      let out = `${getBanner()}\n\ndev-memo hooks installed (agents: ${agents.join(", ")})\n`;
       if (defaultedToClaude) {
         out += `\n[Notice]: No agent configuration folders were detected, so dev-memo defaulted to claude-code.\nIf you are using a different agent, specify it explicitly:\n  dev-memo install codex\n  dev-memo install cursor\n`;
       }
@@ -745,6 +748,7 @@ export async function runCli(
         out += `\n[Notice for Cursor]: Cursor CLI lacks a reliable SessionEnd event.\nDev-Memo uses an N-accumulated-events trigger (default 10) instead.\nFor a perfect flush when exiting, run your agent via: dev-memo wrap cursor-agent <args>\n`;
       }
       return { exitCode: 0, stdout: out, stderr: "" };
+
     } else if (command === "status") {
       const output = runStatus(cwd);
       return { exitCode: 0, stdout: output + "\n", stderr: "" };

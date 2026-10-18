@@ -35,4 +35,22 @@ describe("CLI Banner", () => {
       }
     }
   });
+
+  it("includes the banner in runCli([]) and runCli(['--help'])", async () => {
+    const { runCli } = await import("./index.js");
+    const emptyRes = await runCli([], { cwd: process.cwd() });
+    expect(emptyRes.stdout).toContain("██████╗");
+    expect(emptyRes.stdout).toContain("Usage: dev-memo");
+
+    const helpRes = await runCli(["--help"], { cwd: process.cwd() });
+    expect(helpRes.stdout).toContain("██████╗");
+    expect(helpRes.stdout).toContain("Commands:");
+  });
+
+  it("does NOT include the banner in operational commands like status", async () => {
+    const { runCli } = await import("./index.js");
+    const statusRes = await runCli(["status"], { cwd: process.cwd() });
+    expect(statusRes.stdout).not.toContain("██████╗");
+  });
 });
+

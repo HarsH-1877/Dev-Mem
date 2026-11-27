@@ -110,8 +110,7 @@ describe("Adversarial & Edge Cases (Core)", () => {
           type: "Discovery",
           title: "Node " + i,
           content: "Content " + i,
-          evidence: { source: "test", commit: "test_commit", files: ["file.ts"], session_id: "s1", agent: "test", timestamp: new Date().toISOString(), confidence: 1.0 },
-          files: ["file.ts"]
+          evidence: { commit: "test_commit", files: ["file.ts"], session_id: "s1", agent: "test", timestamp: new Date().toISOString(), confidence: 1.0 },
         });
       }
       

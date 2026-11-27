@@ -6,11 +6,16 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         node-version: [22.x]
 
     steps:
@@ -22,4 +27,85 @@ jobs:
         cache: 'npm'
     - run: npm ci
     - run: npm run build
+    - run: npm run typecheck
     - run: npm test
+    - run: npm run ci:check
+
+  pr-hygiene:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check PR issue reference & diff hygiene
+      env:
+        PR_BODY: ${{ github.event.pull_request.body }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        node --input-type=module - <<'EOF'
+        import { execFileSync } from "node:child_process";
+        import { appendFileSync } from "node:fs";
+
+        const body = process.env.PR_BODY || "";
+        const base = process.env.BASE_SHA;
+        const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+        const lines = ["## PR Hygiene Report", ""];
+        let failed = false;
+
+        // 1. Issue-first policy (CONTRIBUTING.md)
+        if (!/#\d+/.test(body)) {
+          console.error("::error::PR description must reference a linked issue (e.g. Fixes #12 or Refs #3).");
+          lines.push("- **Issue reference:** FAIL — missing `#N` issue reference in PR description.");
+          failed = true;
+        } else {
+          lines.push("- **Issue reference:** PASS");
+        }
+
+        // 2. Inspect changed files in PR diff against base commit
+        const diffFiles = execFileSync("git", ["diff", "--name-only", base, "HEAD"], { encoding: "utf8" })
+          .split(/\r?\n/)
+          .filter(Boolean);
+
+        const forbidden = diffFiles.filter((f) => f.startsWith("dist/") || f.startsWith(".dev-mem/") || f.endsWith(".tgz"));
+        if (forbidden.length > 0) {
+          console.error(`::error::PR includes generated/local files: ${forbidden.join(", ")}`);
+          lines.push(`- **Forbidden artifacts:** FAIL — ${forbidden.join(", ")}`);
+          failed = true;
+        } else {
+          lines.push("- **Forbidden artifacts:** PASS");
+        }
+
+        const sensitiveConfigs = diffFiles.filter((f) =>
+          ["package.json", "package-lock.json", "tsconfig.json", "tsconfig.typecheck.json", "vitest.config.ts"].includes(f) ||
+          f.startsWith(".github/")
+        );
+        if (sensitiveConfigs.length > 0) {
+          console.log(`::warning::PR modifies build/CI/manifest files — review carefully: ${sensitiveConfigs.join(", ")}`);
+          lines.push(`- **Manifest / CI files touched:** REVIEW — \`${sensitiveConfigs.join("`, `")}\``);
+        } else {
+          lines.push("- **Manifest / CI files touched:** None");
+        }
+
+        const evalSensitive = diffFiles.filter((f) =>
+          f.startsWith("core/retrieval/") || f.startsWith("core/regression/") || f.startsWith("core/extraction/")
+        );
+        if (evalSensitive.length > 0 && !/eval/i.test(body)) {
+          console.log(`::warning::PR modifies ${evalSensitive.join(", ")} without mentioning eval harness results in the description.`);
+          lines.push(`- **Eval harness check:** REVIEW — modified \`${evalSensitive.join("`, `")}\` without eval notes in PR body.`);
+        }
+
+        lines.push("", `Changed files (${diffFiles.length}):`);
+        for (const f of diffFiles) lines.push(`- \`${f}\``);
+
+        if (summaryFile) {
+          appendFileSync(summaryFile, lines.join("\n") + "\n", "utf8");
+        }
+        if (failed) process.exit(1);
+        EOF

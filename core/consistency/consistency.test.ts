@@ -152,7 +152,7 @@ describe("checkContradictions (heuristic, no API key)", () => {
     });
     store2.close();
 
-    const result = await checkContradictions(newNode, tmpDir, undefined, dbPath);
+    const result = await checkContradictions(newNode, tmpDir, dbPath);
 
     // These don't structurally contradict (both affirming different things)
     expect(result.edgesCreated).toHaveLength(0);
@@ -182,7 +182,7 @@ describe("checkContradictions (heuristic, no API key)", () => {
     });
     store2.close();
 
-    const result = await checkContradictions(newNode, tmpDir, undefined, dbPath);
+    const result = await checkContradictions(newNode, tmpDir, dbPath);
 
     // FailedApproach is not in CONTRADICTION_TYPES, should not be flagged
     expect(result.edgesCreated).toHaveLength(0);

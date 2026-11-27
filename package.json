@@ -48,6 +48,8 @@
   },
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "ci:check": "node scripts/ci-check.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "eval": "npm run build && node dist/eval/run-eval.js",

@@ -44,8 +44,19 @@ export function runSync(cwd: string): { importedNodes: number; updatedNodes: num
 }
 
 
-function adapterHook(adapter: "claude-code" | "codex" | "cursor"): string {
-  return `${buildResolverSource()}
+function adapterHook(adapter: "claude-code" | "codex" | "cursor" | "antigravity"): string {
+  const antigravityCwdPrefix = adapter === "antigravity"
+    ? `import { existsSync as __agExists, readFileSync as __agRead } from "node:fs";
+import { join as __agJoin } from "node:path";
+if (!process.env.DEV_MEM_DIST_DIR && !__agExists(__agJoin(process.cwd(), ".dev-mem", "install-path.txt"))) {
+  try {
+    const __agCached = __agRead(__agJoin(process.cwd(), "..", ".dev-mem", "install-path.txt"), "utf8").trim();
+    if (__agCached) process.env.DEV_MEM_DIST_DIR = __agCached;
+  } catch {}
+}
+`
+    : "";
+  return `${antigravityCwdPrefix}${buildResolverSource()}
 if (distDir) {
   try { await import(pathToFileURL(join(distDir, "adapters", "${adapter}", "hook.js")).href); } catch {}
 }
@@ -55,6 +66,7 @@ if (distDir) {
 function getHookScriptCode(_eventName: string): string { return adapterHook("claude-code"); }
 function getCodexHookScriptCode(_eventName: string): string { return adapterHook("codex"); }
 function getCursorHookScriptCode(_eventName: string): string { return adapterHook("cursor"); }
+function getAntigravityHookScriptCode(_eventName: string): string { return adapterHook("antigravity"); }
 
 function getOpenCodeHookScriptCode(): string {
   return `import { spawnSync } from "node:child_process";
@@ -313,9 +325,84 @@ function installOpenCodeHooks(cwd: string) {
   writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
 }
 
+function installAntigravityHooks(cwd: string) {
+  const agentsDir = join(cwd, ".agents");
+  if (!existsSync(agentsDir)) {
+    mkdirSync(agentsDir, { recursive: true });
+  }
+
+  const hooksDir = join(agentsDir, "hooks");
+  if (!existsSync(hooksDir)) {
+    mkdirSync(hooksDir, { recursive: true });
+  }
+
+  const events = ["SessionStart", "PreToolUse", "PostToolUse", "Stop"] as const;
+  const scriptForEvent = (event: string) =>
+    `dev-mem-${event.replace(/([A-Z])/g, "-$1").toLowerCase().replace(/^-/, "")}.js`;
+
+  for (const event of events) {
+    const scriptPath = join(hooksDir, scriptForEvent(event));
+    writeFileSync(scriptPath, getAntigravityHookScriptCode(event), "utf8");
+  }
+
+  const hooksJsonPath = join(agentsDir, "hooks.json");
+  let hooksJson: Record<string, any> = {};
+  if (existsSync(hooksJsonPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        hooksJson = parsed;
+      }
+    } catch {}
+  }
+
+  hooksJson["dev-mem"] = {
+    SessionStart: [
+      {
+        type: "command",
+        command: `node ./hooks/${scriptForEvent("SessionStart")}`,
+        timeout: 10,
+      },
+    ],
+    PreToolUse: [
+      {
+        matcher: "*",
+        hooks: [
+          {
+            type: "command",
+            command: `node ./hooks/${scriptForEvent("PreToolUse")}`,
+            timeout: 5,
+          },
+        ],
+      },
+    ],
+    PostToolUse: [
+      {
+        matcher: "*",
+        hooks: [
+          {
+            type: "command",
+            command: `node ./hooks/${scriptForEvent("PostToolUse")}`,
+            timeout: 5,
+          },
+        ],
+      },
+    ],
+    Stop: [
+      {
+        type: "command",
+        command: `node ./hooks/${scriptForEvent("Stop")}`,
+        timeout: 10,
+      },
+    ],
+  };
+
+  writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2), "utf8");
+}
+
 function installHooks(cwd: string, requestedAgents: string[]) {
   const installedAgents: string[] = [];
-  const validAgents = ["claude-code", "codex", "cursor", "opencode"];
+  const validAgents = ["claude-code", "codex", "cursor", "opencode", "antigravity"];
 
   const explicitAgents = requestedAgents.map(a => a.toLowerCase());
   for (const agent of explicitAgents) {
@@ -330,9 +417,10 @@ function installHooks(cwd: string, requestedAgents: string[]) {
   const codexPresent = explicit ? explicitAgents.includes("codex") : existsSync(join(cwd, ".codex"));
   const cursorPresent = explicit ? explicitAgents.includes("cursor") : existsSync(join(cwd, ".cursor"));
   const opencodePresent = explicit ? explicitAgents.includes("opencode") : (existsSync(join(cwd, ".opencode")) || existsSync(join(cwd, "opencode.json")));
+  const antigravityPresent = explicit ? explicitAgents.includes("antigravity") : (existsSync(join(cwd, ".agents")) || existsSync(join(cwd, ".agent")));
 
   // Default to claude-code if none found and no explicit agents requested.
-  const defaultedToClaude = !explicit && !claudePresent && !codexPresent && !cursorPresent && !opencodePresent;
+  const defaultedToClaude = !explicit && !claudePresent && !codexPresent && !cursorPresent && !opencodePresent && !antigravityPresent;
   if (claudePresent || defaultedToClaude) {
     installClaudeCodeHooks(cwd);
     installedAgents.push("claude-code");
@@ -351,6 +439,11 @@ function installHooks(cwd: string, requestedAgents: string[]) {
   if (opencodePresent) {
     installOpenCodeHooks(cwd);
     installedAgents.push("opencode");
+  }
+
+  if (antigravityPresent) {
+    installAntigravityHooks(cwd);
+    installedAgents.push("antigravity");
   }
 
   ensureLocalDataDir(cwd);
@@ -450,6 +543,31 @@ function uninstallCursorHooks(cwd: string) {
   }
 }
 
+function uninstallAntigravityHooks(cwd: string) {
+  const agentsDir = join(cwd, ".agents");
+  const hooksJsonPath = join(agentsDir, "hooks.json");
+
+  if (existsSync(hooksJsonPath)) {
+    try {
+      const hooksJson = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
+      if (hooksJson && typeof hooksJson === "object" && !Array.isArray(hooksJson) && "dev-mem" in hooksJson) {
+        delete hooksJson["dev-mem"];
+        writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2), "utf8");
+      }
+    } catch {}
+  }
+
+  const hooksDir = join(agentsDir, "hooks");
+  if (existsSync(hooksDir)) {
+    const events = ["SessionStart", "PreToolUse", "PostToolUse", "Stop"];
+    for (const event of events) {
+      const scriptName = `dev-mem-${event.replace(/([A-Z])/g, "-$1").toLowerCase().replace(/^-/, "")}.js`;
+      const scriptPath = join(hooksDir, scriptName);
+      if (existsSync(scriptPath)) rmSync(scriptPath);
+    }
+  }
+}
+
 function uninstallHooks(cwd: string, purge: boolean) {
   // Claude Code
   const claudeDir = join(cwd, ".claude");
@@ -495,6 +613,11 @@ function uninstallHooks(cwd: string, purge: boolean) {
     uninstallOpenCodeHooks(cwd);
   }
 
+  // Antigravity
+  if (existsSync(join(cwd, ".agents"))) {
+    uninstallAntigravityHooks(cwd);
+  }
+
   if (purge) {
     const devMemDir = join(cwd, ".dev-mem");
     if (existsSync(devMemDir)) {
@@ -510,6 +633,7 @@ export function findStaleHooks(cwd: string): string[] {
     [".codex/hooks", /^dev-mem-.*\.js$/],
     [".cursor/hooks", /^dev-mem-.*\.js$/],
     [".opencode/plugins", /^dev-mem.*\.[jt]s$/],
+    [".agents/hooks", /^dev-mem-.*\.js$/],
   ];
   const stale: string[] = [];
   for (const [rel, pattern] of locations) {
@@ -590,6 +714,7 @@ export async function runDoctor(cwd: string, opts: { live?: boolean } = {}): Pro
   const agents = [
     ["claude-code", ".claude/hooks"], ["codex", ".codex/hooks"],
     ["cursor", ".cursor/hooks"], ["opencode", ".opencode/plugins"],
+    ["antigravity", ".agents/hooks"],
   ].filter(([, rel]) => {
     try {
       return existsSync(join(cwd, rel)) &&
@@ -686,7 +811,7 @@ function helpText(): string {
     `Usage: dev-memo <${COMMANDS.join("|")}>`,
     "",
     "Commands:",
-    "  install [agent...]   Install hooks (claude-code, codex, cursor, opencode); auto-detects if omitted",
+    "  install [agent...]   Install hooks (claude-code, codex, cursor, opencode, antigravity); auto-detects if omitted",
     "  status               Show graph and capture status",
     "  doctor [--live]      Check git, hooks, install path and LLM configuration",
     "  query \"<task>\"       Show context relevant to a task",

@@ -1,7 +1,7 @@
 # Dev-Mem — Technical Report
 
-**Version:** 0.4.0 (Competitive Upgrade)  
-**Date:** October 2026  
+**Version:** 0.5.0 (Correctness & Zero-Key Extraction)  
+**Date:** November 2026  
 **Author:** Harsh Asalkar  
 **Repository:** [github.com/HarsH-1877/Dev-Mem](https://github.com/HarsH-1877/Dev-Mem)  
 **Package:** [npmjs.com/package/dev-memo](https://www.npmjs.com/package/dev-memo)  
@@ -670,13 +670,18 @@ score(node) = 0.35 × relevance
 
 Tokenization splits on non-word characters, lowercases, drops stopwords, and filters tokens shorter than 3 characters.
 
-**Freshness** uses exponential decay:
+**Freshness** uses type-aware exponential decay (added in v0.5.0) so durable architectural constraints do not age out alongside transient session findings:
 
 ```
-freshness = e^(−ln(2)/7 × ageDays)
+freshness = e^(−ln(2)/halfLifeDays × ageDays)
 ```
 
-This halves the freshness score every 7 days. A node updated today scores 1.0; a node from 7 days ago scores 0.5; from 14 days ago scores 0.25.
+| Node Type | Half-Life (`halfLifeDays`) | Rationale |
+|-----------|----------------------------|-----------|
+| `Constraint`, `Convention` | 365 days | Stable rules should retire via code staleness or explicit supersession rather than clock time. |
+| `Decision` | 90 days | Architectural choices stay relevant across quarters unless replaced. |
+| `FailedApproach` | 60 days | Failure lessons fade slowly until the underlying files change. |
+| `Discovery`, `OpenIssue` | 14 days | Observations and transient issues decay quickly when unreinforced. |
 
 **Confidence** is the raw `evidence.confidence` value (0.0–1.0) assigned during extraction.
 
@@ -772,11 +777,11 @@ Scores are capped at $\le 1.0$, ensuring verified architectural claims naturally
 
 In earlier versions, context injection occurred solely at `SessionStart`. In conversational agent workflows (e.g. Claude Code or OpenCode), a task evolves across dozens of turns. Injecting all context at the start risks either context loss as the window rolls or token bloat.
 
-In v0.4.0, Dev-Mem introduces **Prompt-Time Delta Injection**:
+In v0.4.0, Dev-Mem introduced **Prompt-Time Delta Injection** (refined in v0.5.0):
 - Listens to Claude Code `UserPromptSubmit` and OpenCode `chat.message` events.
 - Scores the graph against the submitted user prompt as `currentTask`.
-- Filters nodes through `filterUnseenNodes(projectRoot, sessionId, candidates)` against `.dev-mem/sessions/<session-id>.injected.json`.
-- Only un-injected nodes scoring above $0.35$ are injected into the turn. Once injected, a node is marked as seen for the duration of that session, guaranteeing zero repeated context tokens or spam across turns.
+- Gates candidates on raw topical `relevance >= 0.08` (`minRelevance`, added in v0.5.0) **before** knapsack budget selection so fresh, high-confidence nodes with zero topical overlap cannot leak in due to default proximity (`0.5`).
+- Filters surviving candidates through `filterUnseenNodes(projectRoot, sessionId, candidates)` against `.dev-mem/sessions/<session-id>.injected.json`, guaranteeing zero repeated context tokens across turns.
 
 ---
 
@@ -884,16 +889,15 @@ Walks all non-stale, non-superseded nodes and marks any whose cited files or cod
 - **Symbol-Level Staleness (v0.4.0):** If cited files exist on disk and `node.evidence.symbols` is populated with functions, classes, or variables, Dev-Mem inspects the contents of those files. If **none** of the cited symbols appear in any of the cited files (e.g. after a refactor or deletion), the node transitions to `stale`.
 - Runs once per extraction, excluding freshly inserted nodes.
 
-#### 6.6.3 Surviving Node Auto-Promotion
+#### 6.6.3 Surviving Node Auto-Promotion & Grounding Verification
 
 **Location:** `core/consistency/index.ts` (`promoteSurvivingNodes`)
 
-In earlier versions, extracted nodes remained in the initial `observed` state until manually verified.
-
-In v0.4.0, Dev-Mem automatically promotes surviving nodes:
-- When a subsequent session completes, Dev-Mem checks all existing `observed` nodes whose cited files were modified or touched during that session.
-- If those files still exist on disk and pass staleness checks, the node is automatically promoted from `observed` to `active`.
-- If a new node defines `supersedes_edges` or `resolves_edges`, the targeted nodes (including resolved `OpenIssue` nodes) are transitioned to `superseded`.
+In v0.5.0, promotion and grounding follow strict anti-hallucination rules:
+- When a node has neither cited files nor session file touches or commit SHA, extraction marks `evidence.grounded = false` instead of fabricating synthetic file grounding. Ungrounded nodes are excluded from file-existence staleness checks and regression warnings, and receive a `0.85x` retrieval tie-breaker multiplier.
+- When a subsequent session completes, `promoteSurvivingNodes()` promotes `observed → active` **only** for `Decision`, `Constraint`, `Convention`, and `Discovery` nodes whose cited files remain valid on disk **and** were corroborated by passing tests (`exit_code === 0` test runner execution) or git commit advancement.
+- `FailedApproach` and `OpenIssue` nodes are **never** auto-promoted by file touch.
+- If a new node defines `supersedes_edges` or `resolves_edges`, targeted nodes transition monotonically to `superseded`.
 
 ---
 
@@ -935,9 +939,9 @@ The `superseded` state is terminal — a superseded node cannot be revived. The 
 
 ### 6.8 LLM Provider Abstraction
 
-**Location:** `core/llm/`
+**Location:** `core/llm/` (`index.ts`, `cli-agent.ts`, `anthropic.ts`, `openai.ts`, `gemini.ts`)
 
-Dev-Mem supports multiple LLM providers for the extraction step. All implementations use **native `fetch()`** with zero SDK dependencies.
+Dev-Mem supports both **zero-API-key host agent CLIs** (introduced in v0.5.0) and direct REST endpoints using **native `fetch()`** with zero SDK dependencies.
 
 #### 6.8.1 Provider Interface
 
@@ -950,24 +954,23 @@ interface LlmProvider {
 
 #### 6.8.2 Supported Providers
 
-| Provider | Env Variable | Default Model | Notes |
-|----------|-------------|---------------|-------|
-| **Anthropic** | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | Direct Messages API via fetch |
-| **OpenAI** | `OPENAI_API_KEY` | `gpt-4o-mini` | Chat Completions API via fetch |
-| **Gemini** | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-2.0-flash` | Generative Language API via fetch |
-| **OpenAI-Compatible** | `DEV_MEM_LLM_BASE_URL` | `gpt-4o-mini` | Any OpenAI-compatible endpoint: Ollama, Groq, OpenRouter, LM Studio, DeepSeek. No API key required for local Ollama. |
+| Provider | Config / Env Variable | Default Model | Notes |
+|----------|-----------------------|---------------|-------|
+| **Host Agent CLI (`cli-claude`, `cli-codex`, `cli-gemini`)** | Auto-detected on `PATH` (or `provider: cli-*`) | `haiku` / CLI default | Pipes compacted prompt via `stdin` in `os.tmpdir()` with `DEV_MEM_DISABLE_HOOKS=1` loop guard; uses existing subscription with $0 extra billing. |
+| **Anthropic** | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` | Direct Messages API via fetch |
+| **OpenAI** | `OPENAI_API_KEY` | `gpt-5-mini` | Chat Completions API via fetch |
+| **Gemini** | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3.5-flash` | Generative Language API via fetch |
+| **OpenAI-Compatible** | `DEV_MEM_LLM_BASE_URL` | `llama3.1` | Ollama, Groq, OpenRouter, LM Studio, DeepSeek. No API key required for local Ollama. |
 
 #### 6.8.3 Resolution Priority
 
-Provider resolution follows a strict priority order (first match wins):
+Provider resolution follows a deterministic priority order (explicit overrides win; zero-key session CLI precedes ambient env keys):
 
-1. Explicit `provider` + `apiKey` in function options
-2. `DEV_MEM_LLM_PROVIDER` + `DEV_MEM_LLM_API_KEY` env vars
-3. `DEV_MEM_LLM_BASE_URL` env var (OpenAI-compatible)
-4. `ANTHROPIC_API_KEY` env var
-5. `OPENAI_API_KEY` env var
-6. `GEMINI_API_KEY` or `GOOGLE_API_KEY` env var
-7. `.dev-mem/config.yml` file settings (lowest priority)
+1. Explicit `provider` / `DEV_MEM_LLM_PROVIDER` (or `.dev-mem/config.yml` `llm_provider`)
+2. Explicit `DEV_MEM_LLM_BASE_URL` / config `llm_base_url`
+3. Host agent CLI matching `sessionAgent` (`claude-code` → `claude`, `codex` → `codex`, `gemini` → `gemini`), unless `DEV_MEM_DISABLE_CLI_LLM=1`
+4. Ambient API key env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`)
+5. Any other detected host agent CLI on `PATH` (`claude`, `codex`, `gemini`)
 
 ---
 
@@ -1012,7 +1015,7 @@ Traditional MCP servers frequently operate as resident HTTP or WebSocket daemons
 
 The server adheres to the standard Model Context Protocol (2024-11-05 revision):
 
-1. **`initialize`:** Returns server capabilities (`tools: {}`), protocol version (`2024-11-05`), and server identity (`name: "dev-memo"`, `version: "0.4.0"`).
+1. **`initialize`:** Returns server capabilities (`tools: {}`), protocol version (`2024-11-05`), and server identity (`name: "dev-memo"`, dynamic `version` read from `package.json`).
 2. **`ping`:** Returns empty result object confirming pipe liveness.
 3. **`notifications/*`:** Handled as one-way notifications without response payloads.
 4. **`tools/list`:** Returns JSON schemas for all available tools.
@@ -1049,7 +1052,7 @@ Dev-Mem solves this through a **hybrid storage architecture**:
 
 #### 6.10.2 Deterministic Line Format & Merge Safety
 To prevent merge conflicts during concurrent team branches, `exportSharedGraph()` enforces strict deterministic serialization:
-1. **Curated Filtering:** Only nodes with lifecycle state `active` or `verified` are exported. Local `observed` scratch notes, as well as `superseded` or `stale` records, are filtered out to prevent repository noise.
+1. **Curated Filtering & Retirement Tombstones:** Exports live curated nodes (`active`, `verified`), `superseded` retirements, and previously curated `stale` tombstones so teammate retirements propagate instead of leaving stale zombie entries behind. Ephemeral local-only `observed` scratch notes stay excluded.
 2. **Deterministic Node Sorting:** Exported nodes are sorted lexicographically by node ID (`a.id.localeCompare(b.id)`).
 3. **Connecting Edge Isolation:** Only edges connecting two exported shareable nodes are included (`nodeIdSet.has(from_id) && nodeIdSet.has(to_id)`), sorted lexicographically by edge ID (`a.id.localeCompare(b.id)`).
 4. **Independent JSONL Records:** Each node and edge is written as a discrete, self-contained JSON line:
@@ -1058,11 +1061,12 @@ To prevent merge conflicts during concurrent team branches, `exportSharedGraph()
 
 Because each record occupies exactly one line and entries are deterministically sorted, Git treats entries as independent additions and deletions. Standard Git line merge algorithms resolve branch merges cleanly without artificial conflicts.
 
-#### 6.10.3 Lifecycle Promotion on Import
+#### 6.10.3 Lifecycle Promotion & Last-Writer-Wins Import
 When importing `.dev-mem/shared.jsonl` via `importSharedGraph()`:
-- **New Records:** Any node or connecting edge not currently present in the local SQLite graph is inserted directly.
-- **State Promotion:** If a node exists locally in `observed` state, but the incoming shared record contains the same node in `active` or `verified` state, Dev-Mem automatically executes a lifecycle transition to promote the local node.
-- **Fault-Tolerant Parsing:** Any malformed JSON lines or incomplete records are silently skipped, preventing corrupted Git merge artifacts from breaking local store initialization.
+- **New Records:** Missing nodes and connecting edges are inserted directly while preserving original `created_at` and `updated_at` timestamps.
+- **Last-Writer-Wins Updates & Retirements (v0.5.0):** When an incoming record has a strictly newer `updated_at` timestamp, `GraphStore.updateNode()` syncs title/content/evidence edits and applies valid lifecycle transitions (including `superseded` and `stale` retirements; `superseded` remains terminal).
+- **State Promotion:** Legacy local `observed` nodes transition forward when incoming shared records promote or retire them.
+- **Fault-Tolerant Parsing:** Malformed JSON lines, null/primitive values, and incomplete records are silently skipped.
 
 #### 6.10.4 Automatic Session-Start Import
 To eliminate manual coordination overhead, Dev-Mem integrates shared graph synchronization directly into the agent lifecycle:
@@ -1188,6 +1192,7 @@ Lifecycle States:
 - observed: 2
 
 Last capture: 2026-09-30T15:20:14.120Z
+Last extraction: 2026-09-30T15:20:19.442Z — ok (3 nodes via cli-claude)
 ```
 
 **`dev-memo prune`:**

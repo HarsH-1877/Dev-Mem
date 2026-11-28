@@ -23,9 +23,9 @@
 
 ---
 
-Dev-Mem gives AI coding agents (Claude Code, Codex, Cursor, OpenCode) a persistent local knowledge store that survives session restarts and agent switches. It records decisions, failed approaches, constraints, and discoveries your agent makes while coding, and injects the relevant ones at the start of each new session — so the next session doesn't re-investigate what the last one already figured out.
+Dev-Mem gives your AI coding agents (Claude Code, Cursor, OpenCode, Codex, and MCP tools) persistent project memory that survives session restarts and agent switches. It automatically captures architectural decisions, constraints, and failed approaches while you code — injecting relevant context at session start and as you prompt so your agent never repeats past mistakes or re-investigates solved problems.
 
-Everything stays on your machine. No server, no network dependency beyond your existing LLM API key.
+**100% local, lightweight, and private.** It runs only on-demand with no background servers eating your RAM, works with your existing Claude Code, Codex, or Gemini CLI subscription (no extra API key required), scrubs secrets automatically, and syncs curated knowledge across your team through standard Git commits.
 
 ---
 
@@ -33,10 +33,14 @@ Everything stays on your machine. No server, no network dependency beyond your e
 
 - Node.js 22+
 - An existing project with at least one of: `.claude/`, `.codex/`, or `.cursor/` already present (or a Claude Code project, which creates `.claude/` automatically)
-- An LLM API key for the extraction step — any ONE of:
-  - `ANTHROPIC_API_KEY` (Claude, default: `claude-haiku-4-5`)
-  - `OPENAI_API_KEY` (OpenAI, default: `gpt-5-mini`)
-  - `GEMINI_API_KEY` or `GOOGLE_API_KEY` (Gemini, default: `gemini-3.5-flash`)
+- An extraction backend — **no extra API key needed** if you already have one of these CLIs authenticated on your `PATH`:
+  - `claude` (Claude Code CLI subscription)
+  - `codex` (Codex CLI subscription)
+  - `gemini` (Gemini CLI)
+- Or optionally configure a direct API key / local model fallback:
+  - `ANTHROPIC_API_KEY` (default: `claude-haiku-4-5`)
+  - `OPENAI_API_KEY` (default: `gpt-5-mini`)
+  - `GEMINI_API_KEY` or `GOOGLE_API_KEY` (default: `gemini-3.5-flash`)
   - `DEV_MEM_LLM_BASE_URL` pointed at any OpenAI-compatible endpoint (Ollama, Groq, OpenRouter, LM Studio, DeepSeek) — no API key required for local Ollama
 
 ---
@@ -125,6 +129,7 @@ Lifecycle States:
 - active: 4
 
 Last capture: 2026-09-18T14:22:07.031Z
+Last extraction: 2026-09-18T14:22:12.410Z — ok (3 nodes via cli-claude)
 ```
 
 If no `.dev-mem/graph.sqlite` exists yet (before the first extraction completes), it prints `GraphStore Error: ...` — this is normal before the first session ends.
@@ -226,8 +231,8 @@ Synced .dev-mem/shared.jsonl (imported: 2, updated: 1, exported: 5 active/verifi
 While Dev-Mem's internal SQLite database (`.dev-mem/graph.sqlite`) and raw event logs (`.dev-mem/events.jsonl`) remain strictly machine-local and gitignored (`.dev-mem/*`), `.dev-mem/shared.jsonl` is explicitly un-ignored (`!.dev-mem/shared.jsonl`). Teams share curated architectural decisions, conventions, constraints, and failure warnings simply by committing `.dev-mem/shared.jsonl` into git:
 
 1. **Deterministic line format:** Records are sorted deterministically by ID, ensuring clean, merge-friendly git diffs with zero line jitter.
-2. **Noise isolation:** Scratch observations (`observed` state) stay local; only confirmed (`active` or `verified`) knowledge is exported.
-3. **Automatic session-start import:** When teammates pull git changes (`git pull`), Dev-Mem automatically imports incoming nodes into their local SQLite store on the next agent `SessionStart`.
+2. **Noise isolation:** Local scratch observations (`observed` state) stay local; curated (`active` or `verified`) knowledge and their `superseded`/`stale` retirements sync cleanly across teammates using `updated_at` last-writer-wins.
+3. **Automatic session-start import:** When teammates pull git changes (`git pull`), Dev-Mem automatically imports incoming nodes and retirements into their local SQLite store on the next agent `SessionStart`.
 
 ---
 
@@ -416,11 +421,11 @@ Once hooks are installed, every agent session does this without any manual steps
 
 **At session start** — Dev-Mem reads the local graph, scores stored knowledge nodes against the current working-tree state (which files are modified, what the session title is), selects the highest-scoring nodes within the token budget, and injects them into the agent's context. Per-session deduplication tracks all injected nodes so subsequent turns never repeat them. If any stored `FailedApproach` nodes match files you're about to work on, a regression warning is injected first.
 
-**At prompt submission (Claude Code `UserPromptSubmit`, OpenCode `chat.message`)** — As the task evolves across turns, Dev-Mem retrieves context scored against the submitted prompt text. Built-in per-session deduplication (`.dev-mem/sessions/<session-id>.injected.json`) ensures only new, un-injected relevant nodes (scoring above threshold) are injected, giving the agent fresh task-specific context without duplicate spam or wasted tokens.
+**At prompt submission (Claude Code `UserPromptSubmit`, OpenCode `chat.message`)** — As the task evolves across turns, Dev-Mem filters strictly on topical relevance (`minRelevance >= 0.08`) against the submitted prompt text and applies type-aware freshness decay (`Constraint`/`Convention` persist long-term while ephemeral `Discovery`/`OpenIssue` decay faster). Built-in per-session deduplication (`.dev-mem/sessions/<session-id>.injected.json`) ensures only new, un-injected relevant nodes are injected once per session.
 
 **During the session** — Every tool call (file writes, shell commands) is recorded to `.dev-mem/events.jsonl`. All events are scrubbed before storage: API keys (Anthropic, OpenAI, Gemini, GitHub, AWS, Slack, Bearer tokens, `.env` credentials) and `<private>...</private>` tags are automatically redacted. For Claude Code and Codex, this includes both pre- and post-execution snapshots. For Cursor, post-execution only. Mid-session regression checks also run on file writes.
 
-**At session end (Claude Code, Codex)** — Dev-Mem runs a deterministic compaction pass (stripping duplicate reads, collapsing consecutive status checks, and capping passing tool output) to reduce token overhead by 70–90%, followed by a single batched LLM call that extracts typed knowledge nodes from the session's compacted event log. Extracted nodes start in `observed` state. This call happens in a detached background process and doesn't block the agent.
+**At session end (Claude Code, Codex)** — Dev-Mem runs a deterministic compaction pass (stripping duplicate reads, collapsing consecutive status checks, and capping passing tool output) to reduce token overhead by 70–90%, followed by a single batched call (using your already-authenticated host CLI or configured API key) that extracts typed knowledge nodes and verifies surviving nodes only when corroborated by passing tests or commit advancement. Every run records its status and any errors to `.dev-mem/extraction.log` so diagnostics are always visible in `dev-memo status`.
 
 **After N tool calls (Cursor)** — Same extraction step, triggered mid-session every N completed tool calls (default 10) rather than at session end.
 

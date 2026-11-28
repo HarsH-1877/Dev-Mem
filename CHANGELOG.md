@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 — 2026-11-28
+
+### Added
+- **Zero-API-Key Host CLI Extraction (`core/llm/cli-agent.ts`)**: Dev-Mem now reuses your already-authenticated coding agent CLI (`claude`, `codex`, `gemini`) over headless `stdin` before falling back to ambient API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`), eliminating the separate-API-key onboarding blocker. Includes a `DEV_MEM_DISABLE_HOOKS=1` recursion guard across all four agent hooks.
+- **Extraction Visibility Log (`.dev-mem/extraction.log`)**: Every extraction run records timestamp, session, provider, created node count, and error reason. Surfaced directly in `dev-memo status` and `dev-memo doctor`.
+- **`GraphStore.updateNode()`**: Persists title, content, evidence, and explicit timestamp updates safely in SQLite.
+
+### Fixed
+- **Prompt-Time Relevance Gate (`UserPromptSubmit` / `chat.message`)**: Gated prompt injection on raw topical `relevance >= 0.08` rather than composite score (`> 0.35`), stopping zero-relevance recent nodes from leaking into unrelated prompts when `currentFiles` is omitted.
+- **Type-Aware Freshness Decay**: Replaced flat 7-day decay with type-specific half-lives (`Constraint`/`Convention`: 365d, `Decision`: 90d, `FailedApproach`: 60d, `Discovery`/`OpenIssue`: 14d).
+- **Evidence Grounding & Honest Lifecycle Promotion**: Replaced synthetic `README.md`/`0000...` fallback grounding with explicit `evidence.grounded = false` tagging (excluded from file staleness and regression warnings). Auto-promotion (`observed → active`) now requires corroborating evidence (passing tests or commit advancement) and never auto-promotes `FailedApproach` or `OpenIssue` nodes.
+- **Bidirectional Team Sync Tombstones & LWW**: `dev-memo sync` now exports `superseded` and curated `stale` tombstones alongside `active`/`verified` nodes and applies `updated_at` last-writer-wins updates on import so retired decisions and content edits propagate cleanly across teammates.
+- **MCP Server Version**: `dev-memo mcp` `initialize` now reads `serverInfo.version` dynamically from `package.json`.
+
 ## 0.4.0 — 2026-10-17
 
 ### Added

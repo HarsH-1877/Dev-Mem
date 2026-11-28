@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { GraphStore } from "../../core/graph/index.js";
 import { resolveProviderForProject } from "../../core/llm/index.js";
 import { getEventsLogPath, isLinkedWorktree, readLastExtractionLog, resolveStorageRoot } from "../../core/local-data.js";
+import { collectStats } from "../../core/telemetry/index.js";
 import { buildResolverSource } from "../hook-resolver.js";
 import { findStaleHooks } from "./install.js";
 
@@ -143,4 +144,34 @@ export async function runDoctor(cwd: string, opts: { live?: boolean } = {}): Pro
   }
 
   return { ok, lines };
+}
+
+export function runStats(cwd: string, args: string[] = []): { exitCode: number; stdout: string; stderr: string } {
+  const stats = collectStats(cwd);
+  if (args.includes("--json")) {
+    return { exitCode: 0, stdout: JSON.stringify(stats, null, 2) + "\n", stderr: "" };
+  }
+
+  const verifiedPct =
+    stats.totalNodes > 0
+      ? Math.round(((stats.verifiedNodes + stats.activeNodes) / stats.totalNodes) * 100)
+      : 0;
+
+  const lines = [
+    "Dev-Mem Knowledge & ROI Stats",
+    "─────────────────────────────",
+    `Nodes:                 ${stats.totalNodes} (verified: ${stats.verifiedNodes}, active: ${stats.activeNodes}, observed: ${stats.observedNodes}, stale: ${stats.staleNodes}, superseded: ${stats.supersededNodes})`,
+    `Curated ratio:         ${verifiedPct}% verified/active | Grounded evidence: ${stats.groundedNodes}/${stats.totalNodes}`,
+    `Edges:                 ${stats.edgeCount}`,
+    `Sessions assisted:     ${stats.sessionsAssisted}`,
+    `Memories injected:     ${stats.totalInjections}`,
+    `Regression warnings:   ${stats.preventedRegressions}`,
+    `Extractions run:       ${stats.extractions.total} (${stats.extractions.succeeded} ok, ${stats.extractions.failed} failed)`,
+  ];
+
+  if (isLinkedWorktree(cwd)) {
+    lines.push(`Worktree storage:      ${resolveStorageRoot(cwd)} (shared)`);
+  }
+
+  return { exitCode: 0, stdout: lines.join("\n") + "\n", stderr: "" };
 }

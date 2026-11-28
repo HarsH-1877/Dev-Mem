@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getDevMemDir } from "../local-data.js";
+import { recordTelemetryEvent, type TelemetryEventKind } from "../telemetry/index.js";
 
 function sessionStatePath(projectRoot: string, sessionId: string, suffix: string): string {
   const dir = join(getDevMemDir(projectRoot), "sessions");
@@ -14,6 +15,7 @@ function filterUnseenById<T>(
   suffix: string,
   items: T[],
   getId: (item: T) => string,
+  telemetryKind: TelemetryEventKind,
 ): T[] {
   if (!sessionId || items.length === 0) return items;
   try {
@@ -38,6 +40,11 @@ function filterUnseenById<T>(
     }
     if (unseen.length > 0) {
       writeFileSync(path, JSON.stringify([...seenSet]), "utf8");
+      recordTelemetryEvent(projectRoot, {
+        kind: telemetryKind,
+        session_id: sessionId,
+        count: unseen.length,
+      });
     }
     return unseen;
   } catch {
@@ -66,7 +73,7 @@ export function filterUnseenNodes<T extends { id: string }>(
   sessionId: string,
   nodes: T[],
 ): T[] {
-  return filterUnseenById(projectRoot, sessionId, "injected", nodes, (n) => n.id);
+  return filterUnseenById(projectRoot, sessionId, "injected", nodes, (n) => n.id, "injection");
 }
 
 /**
@@ -78,5 +85,5 @@ export function filterUnseenWarnings<T extends { node: { id: string } }>(
   sessionId: string,
   matches: T[],
 ): T[] {
-  return filterUnseenById(projectRoot, sessionId, "warnings", matches, (m) => m.node.id);
+  return filterUnseenById(projectRoot, sessionId, "warnings", matches, (m) => m.node.id, "regression_warning");
 }

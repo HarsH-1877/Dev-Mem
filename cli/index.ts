@@ -8,7 +8,7 @@ import { syncSharedGraph } from "../core/sync/index.js";
 import { exportMemoryMarkdown } from "../core/sync/markdown.js";
 import { getBanner } from "./banner.js";
 import { installHooks, uninstallHooks, findStaleHooks } from "./commands/install.js";
-import { runStatus, runDoctor } from "./commands/diagnostics.js";
+import { runStatus, runDoctor, runStats } from "./commands/diagnostics.js";
 import { runQuery, runInspect } from "./commands/inspect.js";
 import { extractOnce, runWrap } from "./commands/extract.js";
 import { runBootstrap } from "./commands/bootstrap.js";
@@ -21,6 +21,7 @@ const COMMANDS = [
   "init",
   "install",
   "status",
+  "stats",
   "query",
   "list",
   "search",
@@ -82,6 +83,7 @@ function helpText(): string {
     "  install [agent...]   Install hooks (claude-code, codex, cursor, opencode); auto-detects if omitted",
     "  bootstrap [--from f] Mine git reverts, CLAUDE.md/AGENTS.md & --claude-memory ($0 cost)",
     "  status               Show graph and capture status",
+    "  stats [--json]       Show injections, prevented regressions, and verification stats",
     "  doctor [--live]      Check git, hooks, install path and LLM configuration",
     "  query \"<task>\"       Show context relevant to a task",
     "  list [--state]       List stored knowledge nodes (short IDs shown)",
@@ -150,6 +152,8 @@ export async function runCli(
       return { exitCode: 0, stdout: out, stderr: "" };
     } else if (command === "status") {
       return { exitCode: 0, stdout: runStatus(cwd) + "\n", stderr: "" };
+    } else if (command === "stats") {
+      return runStats(cwd, args);
     } else if (command === "doctor") {
       const r = await runDoctor(cwd, { live: args.includes("--live") });
       return { stdout: r.lines.join("\n") + "\n", stderr: "", exitCode: r.ok ? 0 : 1 };

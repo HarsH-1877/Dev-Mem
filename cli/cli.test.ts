@@ -772,6 +772,14 @@ describe("dev-memo export --md & sync MEMORY.md integration (v0.7)", () => {
     expect(existsSync(outPath)).toBe(true);
     expect(readFileSync(outPath, "utf8")).toContain("verified");
   });
+
+  it("reports local stats via dev-memo stats --json", async () => {
+    const res = await runCli(["stats", "--json"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    const parsed = JSON.parse(res.stdout);
+    expect(parsed.totalNodes).toBe(1);
+    expect(parsed.verifiedNodes).toBe(1);
+  });
 });
 
 

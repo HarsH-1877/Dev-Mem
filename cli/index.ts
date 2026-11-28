@@ -14,6 +14,7 @@ import { extractOnce, runWrap } from "./commands/extract.js";
 import { runBootstrap } from "./commands/bootstrap.js";
 import { runInit } from "./commands/init.js";
 import { runApprove, runEdit, runForget, runList, runSearch } from "./commands/manage.js";
+import { runPrContextCommand } from "./commands/pr-context.js";
 import { runReview } from "./commands/review.js";
 
 const COMMANDS = [
@@ -35,6 +36,7 @@ const COMMANDS = [
   "prune",
   "sync",
   "export",
+  "pr-context",
   "mcp",
   "bootstrap",
 ] as const;
@@ -93,6 +95,7 @@ function helpText(): string {
     "  prune                Remove events from already-extracted sessions from events.jsonl",
     "  sync                 Sync active/verified nodes with git-friendly .dev-mem/shared.jsonl & MEMORY.md",
     "  export --md          Export git-diffable MEMORY.md summary (optional --agents-md, --out)",
+    "  pr-context           Generate PR regression/context comment (supports --verify-on-merge)",
     "  wrap <command...>    Run a command, then flush captured events",
     "  mcp                  Run the stdio Model Context Protocol (MCP) server",
     "  uninstall [--purge]  Remove hooks (--purge also deletes .dev-mem/)",
@@ -223,6 +226,8 @@ export async function runCli(
           ".\n",
         stderr: "",
       };
+    } else if (command === "pr-context") {
+      return runPrContextCommand(cwd, args);
     } else if (command === "mcp") {
       const { startMcpStdioServer } = await import("../core/mcp/server.js");
       await startMcpStdioServer(cwd);

@@ -60,6 +60,12 @@ export {
   type ExportMarkdownResult,
 } from "./sync/markdown.js";
 export {
+  runPrContext,
+  detectChangedFilesFromGit,
+  type PrContextOptions,
+  type PrContextResult,
+} from "./ci/pr-context.js";
+export {
   bootstrapProject,
   type BootstrapOptions,
   type BootstrapResult,

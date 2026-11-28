@@ -324,8 +324,8 @@ export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
   let scoredNodes: RetrievedNode[] = nodes.map(node => {
     const jaccardRel = calculateRelevance(node, currentTask, currentFiles);
     const bm25Rel    = ftsScores.get(node.id) ?? 0;
-    const relevance  = bm25Rel > 0
-      ? Math.min(1.0, Math.max(jaccardRel, 0.55 * bm25Rel + 0.45 * jaccardRel))
+    const relevance  = bm25Rel > 0 && jaccardRel >= 0.07
+      ? Math.min(1.0, 0.50 * bm25Rel + 0.50 * jaccardRel)
       : jaccardRel;
     const freshness  = calculateFreshness(node.updated_at || node.created_at, node.type);
     const confidence = node.evidence.confidence;

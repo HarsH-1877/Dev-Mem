@@ -331,13 +331,11 @@ export class GraphStore {
       if (rows.length === 0) return [];
 
       // SQLite FTS5 bm25() returns more negative numbers for stronger matches.
-      // Shift relative to worst rank on small corpora where IDF can be >= 0 so
-      // ordering stays strictly monotonic while mapping cleanly to (0, 1].
-      return rows.map((row, idx) => {
-        const mag = row.raw_rank < 0 ? -row.raw_rank : 0.05 / (1 + row.raw_rank);
-        const bm25Norm = mag / (mag + 1.5);
-        const rankDecay = Math.max(0.2, 1 - idx * 0.05);
-        const score = Math.min(1, Math.max(0.12, bm25Norm * 0.75 + rankDecay * 0.25));
+      // Saturate magnitude monotonically into (0, 1] without inflating weak
+      // single-token matches where corpus-wide IDF approaches zero.
+      return rows.map((row) => {
+        const mag = row.raw_rank < 0 ? -row.raw_rank : 0.08 / (1 + row.raw_rank);
+        const score = Math.min(1, mag / (mag + 1.5));
         return { id: row.id, score };
       });
     } catch {

@@ -147,18 +147,27 @@ function calculateRelevance(
   currentTask?: string,
   currentFiles?: string[],
 ): number {
-  // Build the node's token representation: title + content + file paths
+  // Build the node's token representation: title + content + file paths + symbols
   const nodeText = [
     node.title,
     node.content,
     ...(node.evidence.files ?? []),
+    ...(node.evidence.symbols ?? []),
   ].join(" ");
   const nodeTokens = tokenise(nodeText);
 
   if (currentTask && currentTask.trim().length > 0) {
-    // Strategy 1: task description text overlap
+    // Strategy 1: task description text overlap + symbol match boost
     const taskTokens = tokenise(currentTask);
-    return jaccard(taskTokens, nodeTokens);
+    let score = jaccard(taskTokens, nodeTokens);
+    const taskLower = currentTask.toLowerCase();
+    const symbolHit = (node.evidence.symbols ?? []).some(
+      (s) => s.trim().length >= 3 && taskLower.includes(s.trim().toLowerCase()),
+    );
+    if (symbolHit) {
+      score = Math.min(1.0, score + 0.25);
+    }
+    return score;
   }
 
   if (currentFiles && currentFiles.length > 0) {
@@ -198,11 +207,29 @@ function calculateGraphProximity(node: KnowledgeNode, currentFiles?: string[]): 
   // This is a distinct signal from relevance: a node must cite one of the
   // exact files being touched to get full proximity credit, whereas relevance
   // uses token overlap which gives partial credit for related files.
-  const norm = (p: string) => p.replace(/\\/g, "/");
-  const currentSet = new Set(currentFiles.map(norm));
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/^\.\//, "");
+  const parentDir = (p: string) => {
+    const idx = p.lastIndexOf("/");
+    return idx > 0 ? p.slice(0, idx) : "";
+  };
+  const currentNorm = currentFiles.map(norm);
+  const currentSet = new Set(currentNorm);
   const nodeFiles = node.evidence.files.map(norm);
   const matched = nodeFiles.filter(f => currentSet.has(f)).length;
-  return matched > 0 ? matched / nodeFiles.length : 0.0;
+  if (matched > 0) {
+    return matched / nodeFiles.length;
+  }
+
+  // Partial credit when touched files share parent directory (e.g. same module/package)
+  const currentDirs = new Set(currentNorm.map(parentDir).filter(Boolean));
+  const nodeDirs = nodeFiles.map(parentDir).filter(Boolean);
+  if (currentDirs.size > 0 && nodeDirs.length > 0) {
+    const dirMatched = nodeDirs.filter((d) => currentDirs.has(d)).length;
+    if (dirMatched > 0) {
+      return 0.4 * (dirMatched / nodeDirs.length);
+    }
+  }
+  return 0.0;
 }
 
 // ─── Composite weights ────────────────────────────────────────────────────────
@@ -277,10 +304,14 @@ export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
   const store = new GraphStore({ projectRoot });
 
   let nodes: KnowledgeNode[] = [];
+  let ftsScores = new Map<string, number>();
   try {
     nodes = store
       .queryAllNodes()
       .filter((n) => n.lifecycle_state !== "stale" && n.lifecycle_state !== "superseded");
+    if (currentTask && currentTask.trim().length > 0) {
+      ftsScores = new Map(store.searchFts(currentTask).map((hit) => [hit.id, hit.score]));
+    }
   } finally {
     store.close();
   }
@@ -291,7 +322,11 @@ export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
 
   // Score every candidate node
   let scoredNodes: RetrievedNode[] = nodes.map(node => {
-    const relevance  = calculateRelevance(node, currentTask, currentFiles);
+    const jaccardRel = calculateRelevance(node, currentTask, currentFiles);
+    const bm25Rel    = ftsScores.get(node.id) ?? 0;
+    const relevance  = bm25Rel > 0
+      ? Math.min(1.0, Math.max(jaccardRel, 0.55 * bm25Rel + 0.45 * jaccardRel))
+      : jaccardRel;
     const freshness  = calculateFreshness(node.updated_at || node.created_at, node.type);
     const confidence = node.evidence.confidence;
     const proximity  = calculateGraphProximity(node, currentFiles);

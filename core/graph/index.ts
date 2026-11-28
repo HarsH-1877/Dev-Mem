@@ -82,6 +82,29 @@ function isEdgeType(value: string): value is EdgeType {
   return (EDGE_TYPES as readonly string[]).includes(value);
 }
 
+const FTS_STOPWORDS = new Set([
+  "the", "and", "for", "are", "was", "but", "not", "all", "can", "its",
+  "this", "that", "with", "from", "into", "have", "been", "will", "when",
+  "then", "than", "some", "only", "must", "also", "more", "such", "very",
+  "use", "used", "uses", "using", "via", "per", "any", "out", "get", "set",
+  "new", "add", "run", "or", "near",
+]);
+
+function expandCamelTokens(text: string): string {
+  return text.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+}
+
+function buildFtsMatchExpression(query: string): string | null {
+  const rawTokens = expandCamelTokens(query)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2 && !FTS_STOPWORDS.has(t));
+
+  const unique = [...new Set(rawTokens)].slice(0, 16);
+  if (unique.length === 0) return null;
+  return unique.map((t) => `"${t}"`).join(" OR ");
+}
+
 /**
  * Swappable graph persistence. Callers should depend on this class's methods
  * (createNode, createEdge, queryByType, transitionLifecycleState, walk)
@@ -114,6 +137,46 @@ export class GraphStore {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("busy_timeout = 5000");
     this.db.exec(SCHEMA_SQL);
+    this.ensureFtsSynced();
+  }
+
+  private syncFtsNode(node: KnowledgeNode): void {
+    const filesText = expandCamelTokens(node.evidence.files.join(" "));
+    const symbolsText = (node.evidence.symbols ?? [])
+      .map((s) => `${s} ${expandCamelTokens(s)}`)
+      .join(" ");
+
+    this.db.prepare(`DELETE FROM nodes_fts WHERE node_id = ?`).run(node.id);
+    this.db
+      .prepare(
+        `INSERT INTO nodes_fts (node_id, title, content, files, symbols)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        node.id,
+        `${node.title} ${expandCamelTokens(node.title)}`,
+        node.content,
+        filesText,
+        symbolsText,
+      );
+  }
+
+  private ensureFtsSynced(): void {
+    const missing = this.db
+      .prepare(
+        `SELECT n.* FROM nodes n
+         LEFT JOIN nodes_fts f ON f.node_id = n.id
+         WHERE f.node_id IS NULL`,
+      )
+      .all() as unknown as NodeRow[];
+
+    if (missing.length === 0) return;
+    const backfill = this.db.transaction(() => {
+      for (const row of missing) {
+        this.syncFtsNode(this.rowToNode(row));
+      }
+    });
+    backfill();
   }
 
   close(): void {
@@ -169,6 +232,8 @@ export class GraphStore {
         `INSERT INTO lifecycle_history (node_id, from_state, to_state, timestamp)
          VALUES (?, NULL, ?, ?)`,
       ).run(node.id, node.lifecycle_state, node.created_at);
+
+      this.syncFtsNode(node);
     });
     insert();
 
@@ -239,7 +304,45 @@ export class GraphStore {
     if (!updated) {
       throw new Error(`Node disappeared after update: ${nodeId}`);
     }
+    this.syncFtsNode(updated);
     return updated;
+  }
+
+  /**
+   * Searches the SQLite FTS5 index using BM25 weighting across title (3.0),
+   * symbols (2.5), files (2.0), and content (1.5). Returns descending [0, 1]
+   * normalized relevance scores keyed by node ID.
+   */
+  searchFts(query: string, limit = 50): Array<{ id: string; score: number }> {
+    const matchExpr = buildFtsMatchExpression(query);
+    if (!matchExpr) return [];
+
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT node_id AS id, bm25(nodes_fts, 0.0, 3.0, 1.5, 2.0, 2.5) AS raw_rank
+           FROM nodes_fts
+           WHERE nodes_fts MATCH ?
+           ORDER BY raw_rank ASC
+           LIMIT ?`,
+        )
+        .all(matchExpr, limit) as Array<{ id: string; raw_rank: number }>;
+
+      if (rows.length === 0) return [];
+
+      // SQLite FTS5 bm25() returns more negative numbers for stronger matches.
+      // Shift relative to worst rank on small corpora where IDF can be >= 0 so
+      // ordering stays strictly monotonic while mapping cleanly to (0, 1].
+      return rows.map((row, idx) => {
+        const mag = row.raw_rank < 0 ? -row.raw_rank : 0.05 / (1 + row.raw_rank);
+        const bm25Norm = mag / (mag + 1.5);
+        const rankDecay = Math.max(0.2, 1 - idx * 0.05);
+        const score = Math.min(1, Math.max(0.12, bm25Norm * 0.75 + rankDecay * 0.25));
+        return { id: row.id, score };
+      });
+    } catch {
+      return [];
+    }
   }
 
   createEdge(input: CreateEdgeInput): KnowledgeEdge {

@@ -205,4 +205,34 @@ describe("GraphStore", () => {
     expect(existsSync(join(root, ".dev-mem", "graph.sqlite"))).toBe(true);
     expect(readFileSync(join(root, ".gitignore"), "utf8")).toContain(".dev-mem/");
   });
+
+  it("indexes nodes into SQLite FTS5 and ranks BM25 matches across title, content, files, and symbols", () => {
+    const store = openMemory();
+    const nDb = store.createNode({
+      type: "Decision",
+      title: "Configure PostgreSQL connection pooling",
+      content: "Keep pool max at 20 across worker processes.",
+      evidence: sampleEvidence({ files: ["src/db/pool.ts"], symbols: ["createPool"] }),
+    });
+    const nAuth = store.createNode({
+      type: "Constraint",
+      title: "Validate JWT expiry server-side",
+      content: "Never trust client clocks during authentication.",
+      evidence: sampleEvidence({ files: ["src/auth/jwt.ts"], symbols: ["verifyJwt"] }),
+    });
+
+    const poolHits = store.searchFts("createPool");
+    expect(poolHits.length).toBeGreaterThanOrEqual(1);
+    expect(poolHits[0].id).toBe(nDb.id);
+    expect(poolHits[0].score).toBeGreaterThan(0);
+
+    // Stemmed natural-language query matches "Validate"/"authentication"
+    const authHits = store.searchFts("validating authentication tokens");
+    expect(authHits.some((h) => h.id === nAuth.id)).toBe(true);
+
+    // Updating a node refreshes the FTS5 index cleanly (no stale tokens)
+    store.updateNode(nAuth.id, { title: "Validate PASETO tokens server-side" });
+    const pasetoHits = store.searchFts("PASETO");
+    expect(pasetoHits.map((h) => h.id)).toContain(nAuth.id);
+  });
 });

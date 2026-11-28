@@ -2,10 +2,29 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureLocalDataDir, getDevMemDir, isLinkedWorktree } from "../../core/local-data.js";
+import {
+  ANTIGRAVITY_INSTALLED_EVENTS,
+  ANTIGRAVITY_LIFECYCLE_EVENTS,
+  ANTIGRAVITY_TOOL_EVENTS,
+} from "../../adapters/antigravity/index.js";
 import { buildResolverSource, HOOK_MARKER } from "../hook-resolver.js";
 
 function adapterHook(adapter: "claude-code" | "codex" | "cursor" | "antigravity", eventArg?: string): string {
   const pushEvent = eventArg ? `  process.argv.push("--event", ${JSON.stringify(eventArg)});\n` : "";
+  if (adapter === "antigravity" && eventArg === "PreToolUse") {
+    return `${buildResolverSource()}
+let handled = false;
+if (distDir) {
+${pushEvent}  try {
+    await import(pathToFileURL(join(distDir, "adapters", "${adapter}", "hook.js")).href);
+    handled = true;
+  } catch {}
+}
+if (!handled) {
+  process.stdout.write('{"decision":"allow"}\\n');
+}
+`;
+  }
   return `${buildResolverSource()}
 if (distDir) {
 ${pushEvent}  try { await import(pathToFileURL(join(distDir, "adapters", "${adapter}", "hook.js")).href); } catch {}
@@ -251,68 +270,45 @@ function installOpenCodeHooks(cwd: string): void {
   writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
 }
 
-const ANTIGRAVITY_LIFECYCLE_EVENTS = ["SessionStart", "PreInvocation", "Stop"] as const;
-const ANTIGRAVITY_TOOL_EVENTS = ["PreToolUse", "PostToolUse"] as const;
-const ANTIGRAVITY_EVENTS = [
-  "SessionStart",
-  "PreInvocation",
-  "PreToolUse",
-  "PostToolUse",
-  "Stop",
-] as const;
-
 function installAntigravityHooks(cwd: string): void {
   const agentsDir = join(cwd, ".agents");
-  if (!existsSync(agentsDir)) mkdirSync(agentsDir, { recursive: true });
-
   const hooksDir = join(agentsDir, "hooks");
   if (!existsSync(hooksDir)) mkdirSync(hooksDir, { recursive: true });
 
-  for (const event of ANTIGRAVITY_EVENTS) {
+  for (const event of ANTIGRAVITY_INSTALLED_EVENTS) {
     const scriptName = `dev-mem-${toKebabCase(event)}.js`;
     writeFileSync(join(hooksDir, scriptName), getAntigravityHookScriptCode(event), "utf8");
   }
 
-  const hooksJsonPath = join(agentsDir, "hooks.json");
-  let hooksJson: Record<string, any> = {};
-  if (existsSync(hooksJsonPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        hooksJson = parsed;
-      }
-    } catch {}
-  }
-
-  const devMemoGroup: Record<string, any[]> = {};
-  for (const event of ANTIGRAVITY_LIFECYCLE_EVENTS) {
-    const scriptName = `dev-mem-${toKebabCase(event)}.js`;
-    devMemoGroup[event] = [
-      {
-        type: "command",
-        command: `node .agents/hooks/${scriptName}`,
-        timeout: 5,
-      },
-    ];
-  }
-  for (const event of ANTIGRAVITY_TOOL_EVENTS) {
-    const scriptName = `dev-mem-${toKebabCase(event)}.js`;
-    devMemoGroup[event] = [
-      {
-        matcher: "*",
-        hooks: [
-          {
-            type: "command",
-            command: `node .agents/hooks/${scriptName}`,
-            timeout: 5,
-          },
-        ],
-      },
-    ];
-  }
-
-  hooksJson["dev-memo"] = devMemoGroup;
-  writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2) + "\n", "utf8");
+  mergeJsonFile(join(agentsDir, "hooks.json"), (hooksJson) => {
+    const devMemoGroup: Record<string, any[]> = {};
+    for (const event of ANTIGRAVITY_LIFECYCLE_EVENTS) {
+      const scriptName = `dev-mem-${toKebabCase(event)}.js`;
+      devMemoGroup[event] = [
+        {
+          type: "command",
+          command: `node .agents/hooks/${scriptName}`,
+          timeout: 5,
+        },
+      ];
+    }
+    for (const event of ANTIGRAVITY_TOOL_EVENTS) {
+      const scriptName = `dev-mem-${toKebabCase(event)}.js`;
+      devMemoGroup[event] = [
+        {
+          matcher: "*",
+          hooks: [
+            {
+              type: "command",
+              command: `node .agents/hooks/${scriptName}`,
+              timeout: 5,
+            },
+          ],
+        },
+      ];
+    }
+    hooksJson["dev-memo"] = devMemoGroup;
+  });
 }
 
 export function installHooks(cwd: string, requestedAgents: string[]): { installedAgents: string[]; defaultedToClaude: boolean } {
@@ -473,7 +469,7 @@ function uninstallAntigravityHooks(cwd: string): void {
 
   const hooksDir = join(agentsDir, "hooks");
   if (existsSync(hooksDir)) {
-    for (const event of ANTIGRAVITY_EVENTS) {
+    for (const event of ANTIGRAVITY_INSTALLED_EVENTS) {
       const scriptName = `dev-mem-${toKebabCase(event)}.js`;
       const scriptPath = join(hooksDir, scriptName);
       if (existsSync(scriptPath)) rmSync(scriptPath);

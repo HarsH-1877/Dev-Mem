@@ -27,6 +27,20 @@ describe("Event compaction and log pruning", () => {
     expect((toolCalls[1] as any).stderr).toContain("SQLITE_BUSY");
   });
 
+  it("deduplicates repeated Antigravity view_file calls on the same file", () => {
+    const events: CaptureEvent[] = [
+      { type: "tool_call", id: "1", timestamp: "t1", session_id: "s1", agent: "antigravity", command: "view_file", args: ["src/auth.ts"], exit_code: 0, stdout: "line1" },
+      { type: "tool_call", id: "2", timestamp: "t2", session_id: "s1", agent: "antigravity", command: "view_file", args: ["src/auth.ts"], exit_code: 0, stdout: "line1" },
+      { type: "tool_call", id: "3", timestamp: "t3", session_id: "s1", agent: "antigravity", command: "view_file", args: ["src/db.ts"], exit_code: 0, stdout: "line2" },
+    ];
+
+    const compacted = compactSessionEventsForPrompt(events);
+    const toolCalls = compacted.filter((e) => e.type === "tool_call");
+    expect(toolCalls).toHaveLength(2);
+    expect((toolCalls[0] as any).args).toEqual(["src/auth.ts"]);
+    expect((toolCalls[1] as any).args).toEqual(["src/db.ts"]);
+  });
+
   it("deduplicates consecutive status commands", () => {
     const events: CaptureEvent[] = [
       { type: "tool_call", id: "1", timestamp: "t1", session_id: "s1", agent: "codex", command: "git status", args: [], exit_code: 0, stdout: "clean" },

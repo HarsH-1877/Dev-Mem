@@ -7,11 +7,12 @@
  * Protocol:    JSON via stdin (camelCase fields) -> JSON via stdout
  */
 import { readFileSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { DeterministicCapture } from "../../core/capture/index.js";
 import { retryPendingExtractions } from "../../core/extraction-retry.js";
-import { numberFor, parseHookPayload, recordFor, stringFor } from "../../core/hook-safety.js";
+import { recordFor, stringFor } from "../../core/hook-safety.js";
 import { ANTIGRAVITY_ALL_EVENTS } from "./index.js";
-import type { AntigravityNormalizedHookInput } from "./types.js";
+import type { AntigravityHookEvent, AntigravityNormalizedHookInput } from "./types.js";
 
 const FILE_MUTATION_TOOLS = new Set([
   "write_to_file",
@@ -47,57 +48,104 @@ function parseCliEvent(argv: string[]): string | undefined {
   return undefined;
 }
 
-function parseInput(cliEvent?: string): AntigravityNormalizedHookInput | null {
+interface ParsedHookResult {
+  payload: AntigravityNormalizedHookInput | null;
+  detectedEvent?: string;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const val of values) {
+    if (typeof val === "string") return val;
+  }
+  return undefined;
+}
+
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+  for (const val of values) {
+    if (typeof val === "string" && val.trim() !== "") return val;
+  }
+  return undefined;
+}
+
+function firstFiniteNumber(fallback: number, ...values: unknown[]): number {
+  for (const val of values) {
+    if (typeof val === "number" && Number.isFinite(val)) return val;
+  }
+  return fallback;
+}
+
+function normalizeTouchedPath(rawPath: string, projectRoot: string): string {
+  if (!rawPath) return "";
+  if (isAbsolute(rawPath)) {
+    const rel = relative(resolve(projectRoot), resolve(rawPath));
+    if (rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !rel.startsWith("../") && !isAbsolute(rel)) {
+      return rel.replace(/\\/g, "/");
+    }
+    return rawPath.replace(/\\/g, "/");
+  }
+  return rawPath.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+}
+
+function parseInput(cliEvent?: string): ParsedHookResult {
   try {
     const inputStr = readFileSync(0, "utf-8");
-    if (!inputStr || inputStr.trim() === "") return null;
+    if (!inputStr || inputStr.trim() === "") return { payload: null, detectedEvent: cliEvent };
 
     let raw: unknown;
     try {
       raw = JSON.parse(inputStr);
     } catch (error) {
       console.error(`[dev-mem/antigravity] Ignoring malformed hook JSON: ${(error as Error).message}`);
-      return null;
+      return { payload: null, detectedEvent: cliEvent };
     }
 
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
       console.error("[dev-mem/antigravity] Ignoring hook payload: expected an object");
-      return null;
+      return { payload: null, detectedEvent: cliEvent };
     }
 
     const rawObj = raw as Record<string, unknown>;
+    const rawEventName = typeof rawObj.hook_event_name === "string" ? rawObj.hook_event_name.trim() : "";
+    const detectedEvent = cliEvent ?? (rawEventName || undefined);
+
     const sessionId = stringFor(rawObj.session_id, stringFor(rawObj.conversationId, ""));
+    if (!sessionId) {
+      console.error("[dev-mem/antigravity] Ignoring hook payload: missing string session_id");
+      return { payload: null, detectedEvent };
+    }
+
+    const hookEventName = cliEvent ?? rawEventName;
+    if (!(ANTIGRAVITY_ALL_EVENTS as readonly string[]).includes(hookEventName)) {
+      console.error("[dev-mem/antigravity] Ignoring hook payload: unsupported hook_event_name");
+      return { payload: null, detectedEvent };
+    }
+
     const firstWorkspace = Array.isArray(rawObj.workspacePaths)
       ? stringFor(rawObj.workspacePaths[0], "")
       : "";
     const cwd = stringFor(rawObj.cwd, firstWorkspace || process.cwd());
-    const hookEventName = cliEvent ?? stringFor(rawObj.hook_event_name, "");
 
-    const normalized = {
-      ...rawObj,
-      session_id: sessionId,
-      cwd,
-      hook_event_name: hookEventName,
+    return {
+      payload: {
+        ...rawObj,
+        session_id: sessionId,
+        cwd,
+        hook_event_name: hookEventName as AntigravityHookEvent,
+      } as AntigravityNormalizedHookInput,
+      detectedEvent,
     };
-
-    return parseHookPayload(
-      JSON.stringify(normalized),
-      ANTIGRAVITY_ALL_EVENTS,
-      "antigravity",
-    ) as AntigravityNormalizedHookInput | null;
   } catch (error) {
     console.error(`[dev-mem/antigravity] Ignoring unreadable hook input: ${(error as Error).message}`);
-    return null;
+    return { payload: null, detectedEvent: cliEvent };
   }
 }
 
 function extractEditSnippet(toolArgs: Record<string, unknown>): string {
-  const direct = stringFor(
+  const direct = firstNonEmptyString(
     toolArgs.ReplacementContent,
-    stringFor(
-      toolArgs.CodeContent,
-      stringFor(toolArgs.new_string, stringFor(toolArgs.content, "")),
-    ),
+    toolArgs.CodeContent,
+    toolArgs.new_string,
+    toolArgs.content,
   );
   if (direct) return direct.slice(0, 500);
 
@@ -111,7 +159,10 @@ function extractEditSnippet(toolArgs: Record<string, unknown>): string {
   return "";
 }
 
-function extractToolInvocation(payload: AntigravityNormalizedHookInput): ParsedToolInvocation {
+function extractToolInvocation(
+  payload: AntigravityNormalizedHookInput,
+  projectRoot: string,
+): ParsedToolInvocation {
   const toolCall = recordFor(payload.toolCall ?? payload.tool_call);
   const toolName = stringFor(toolCall.name, stringFor(payload.tool_name));
   const toolArgs = recordFor(toolCall.args ?? toolCall.arguments ?? payload.tool_input);
@@ -128,14 +179,18 @@ function extractToolInvocation(payload: AntigravityNormalizedHookInput): ParsedT
   }
 
   if (FILE_MUTATION_TOOLS.has(toolName) || FILE_READ_TOOLS.has(toolName)) {
-    const filePath = stringFor(
-      toolArgs.TargetFile,
-      stringFor(toolArgs.file_path, stringFor(toolArgs.path, "")),
-    );
+    const rawFilePath =
+      firstNonEmptyString(
+        toolArgs.TargetFile,
+        toolArgs.AbsolutePath,
+        toolArgs.file_path,
+        toolArgs.path,
+      ) ?? "";
+    const filePath = normalizeTouchedPath(rawFilePath, projectRoot);
     return {
       toolName,
       command: toolName,
-      args: [filePath],
+      args: filePath ? [filePath] : [],
       touchedFile: filePath || undefined,
       isMutation: FILE_MUTATION_TOOLS.has(toolName),
       editSnippet: FILE_MUTATION_TOOLS.has(toolName) ? extractEditSnippet(toolArgs) : "",
@@ -180,9 +235,10 @@ async function main() {
   }
 
   const cliEvent = parseCliEvent(process.argv.slice(2));
-  const payload = parseInput(cliEvent);
+  const { payload, detectedEvent } = parseInput(cliEvent);
+  const isPreToolUse = detectedEvent === "PreToolUse" || cliEvent === "PreToolUse";
   if (!payload) {
-    if (cliEvent === "PreToolUse") {
+    if (isPreToolUse) {
       console.log(JSON.stringify({ decision: "allow" }));
     }
     process.exit(0);
@@ -272,7 +328,7 @@ async function main() {
       }
 
       case "PreToolUse": {
-        const invocation = extractToolInvocation(payload);
+        const invocation = extractToolInvocation(payload, projectRoot);
         capture.recordToolCall({
           command: invocation.command,
           args: invocation.args,
@@ -291,42 +347,26 @@ async function main() {
       }
 
       case "PostToolUse": {
-        const invocation = extractToolInvocation(payload);
+        const invocation = extractToolInvocation(payload, projectRoot);
         const toolOutputRec = recordFor(payload.toolOutput);
         const toolResponse = recordFor(payload.toolResponse ?? payload.tool_response);
 
-        const stdout =
-          typeof payload.toolOutput === "string"
-            ? payload.toolOutput
-            : typeof toolOutputRec.stdout === "string"
-              ? toolOutputRec.stdout
-              : typeof toolOutputRec.output === "string"
-                ? toolOutputRec.output
-                : typeof toolResponse.stdout === "string"
-                  ? toolResponse.stdout
-                  : typeof toolResponse.output === "string"
-                    ? toolResponse.output
-                    : undefined;
-
-        const stderr =
-          typeof toolOutputRec.stderr === "string"
-            ? toolOutputRec.stderr
-            : typeof toolResponse.stderr === "string"
-              ? toolResponse.stderr
-              : undefined;
-
-        const exitCode = numberFor(
+        const stdout = firstString(
+          payload.toolOutput,
+          toolOutputRec.stdout,
+          toolOutputRec.output,
+          toolResponse.stdout,
+          toolResponse.output,
+        );
+        const stderr = firstString(toolOutputRec.stderr, toolResponse.stderr);
+        const exitCode = firstFiniteNumber(
+          0,
           payload.exitCode,
-          numberFor(
-            payload.exit_code,
-            numberFor(
-              toolOutputRec.exitCode,
-              numberFor(
-                toolOutputRec.exit_code,
-                numberFor(toolResponse.exitCode, numberFor(toolResponse.exit_code, 0)),
-              ),
-            ),
-          ),
+          payload.exit_code,
+          toolOutputRec.exitCode,
+          toolOutputRec.exit_code,
+          toolResponse.exitCode,
+          toolResponse.exit_code,
         );
 
         capture.recordToolCall({
@@ -344,6 +384,7 @@ async function main() {
         break;
       }
 
+      // PostInvocation fires per-turn; extraction runs only on Stop at conversation execution end.
       case "PostInvocation":
         break;
 
@@ -380,7 +421,7 @@ async function main() {
     }
   } catch (err) {
     console.error("[dev-mem/antigravity] Hook error:", err);
-    if ((payload.hook_event_name === "PreToolUse" || cliEvent === "PreToolUse") && !preToolUseEmitted) {
+    if ((payload.hook_event_name === "PreToolUse" || isPreToolUse) && !preToolUseEmitted) {
       console.log(JSON.stringify({ decision: "allow" }));
     }
   }

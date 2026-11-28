@@ -356,5 +356,125 @@ describe("Antigravity CLI adapter hook", () => {
     });
     expect(badPreTool.status).toBe(0);
     expect(JSON.parse(badPreTool.stdout)).toEqual({ decision: "allow" });
+
+    // Missing conversationId/session_id on PreToolUse WITHOUT --event MUST still emit {"decision":"allow"}
+    const missingConvPreTool = spawnSync(process.execPath, [hookJs], {
+      cwd: dir,
+      input: JSON.stringify({ hook_event_name: "PreToolUse", workspacePaths: [dir] }),
+      encoding: "utf8",
+    });
+    expect(missingConvPreTool.status).toBe(0);
+    expect(JSON.parse(missingConvPreTool.stdout)).toEqual({ decision: "allow" });
+  });
+
+  it("relativizes absolute TargetFile/AbsolutePath paths, handles view_file/Write/Edit aliases, and accepts PostInvocation", () => {
+    const store = new GraphStore({ projectRoot: dir });
+    store.createNode({
+      type: "FailedApproach",
+      title: "Mutating src/auth.ts directly broke session cookies",
+      content: "Use cookie helper",
+      lifecycle_state: "active",
+      evidence: {
+        commit: "5555555555555555555555555555555555555555",
+        files: ["src/auth.ts"],
+        session_id: "prior-rel",
+        agent: "antigravity",
+        timestamp: new Date().toISOString(),
+        confidence: 0.9,
+      },
+    });
+    store.close();
+
+    // Absolute TargetFile should be relativized to "src/auth.ts" and trigger Regression Intelligence
+    const absTarget = spawnSync(process.execPath, [hookJs, "--event", "PreToolUse"], {
+      cwd: dir,
+      input: JSON.stringify({
+        conversationId: "conv-agy-paths",
+        workspacePaths: [dir],
+        toolCall: {
+          name: "replace_file_content",
+          args: { TargetFile: join(dir, "src", "auth.ts"), ReplacementContent: "setCookie()" },
+        },
+      }),
+      encoding: "utf8",
+    });
+    expect(absTarget.status).toBe(0);
+    const absOut = JSON.parse(absTarget.stdout);
+    expect(absOut.decision).toBe("allow");
+    expect(absOut.additionalContext).toContain("Regression Intelligence");
+
+    // view_file with AbsolutePath
+    const viewRes = spawnSync(process.execPath, [hookJs, "--event", "PostToolUse"], {
+      cwd: dir,
+      input: JSON.stringify({
+        conversationId: "conv-agy-paths",
+        workspacePaths: [dir],
+        toolCall: {
+          name: "view_file",
+          args: { AbsolutePath: join(dir, "src", "view.ts") },
+        },
+        exitCode: 0,
+      }),
+      encoding: "utf8",
+    });
+    expect(viewRes.status).toBe(0);
+
+    // Fallback aliases: Write with file_path, Edit with path
+    const writeAlias = spawnSync(process.execPath, [hookJs, "--event", "PostToolUse"], {
+      cwd: dir,
+      input: JSON.stringify({
+        conversationId: "conv-agy-paths",
+        workspacePaths: [dir],
+        toolCall: {
+          name: "Write",
+          args: { file_path: "./src/written.ts", content: "export const a = 1;" },
+        },
+        exitCode: 0,
+      }),
+      encoding: "utf8",
+    });
+    expect(writeAlias.status).toBe(0);
+
+    const editAlias = spawnSync(process.execPath, [hookJs, "--event", "PostToolUse"], {
+      cwd: dir,
+      input: JSON.stringify({
+        conversationId: "conv-agy-paths",
+        workspacePaths: [dir],
+        toolCall: {
+          name: "Edit",
+          args: { path: "src\\edited.ts", new_string: "export const b = 2;" },
+        },
+        exitCode: 0,
+      }),
+      encoding: "utf8",
+    });
+    expect(editAlias.status).toBe(0);
+
+    // PostInvocation is accepted cleanly as a no-op
+    const postInv = spawnSync(process.execPath, [hookJs, "--event", "PostInvocation"], {
+      cwd: dir,
+      input: JSON.stringify({
+        conversationId: "conv-agy-paths",
+        workspacePaths: [dir],
+      }),
+      encoding: "utf8",
+    });
+    expect(postInv.status).toBe(0);
+    expect(postInv.stdout.trim()).toBe("");
+
+    const eventsRaw = readFileSync(join(dir, ".dev-mem", "events.jsonl"), "utf8");
+    const toolEvents = eventsRaw
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line))
+      .filter((e) => e.type === "tool_call");
+    expect(toolEvents).toHaveLength(4);
+    expect(toolEvents[0].args).toEqual(["src/auth.ts"]);
+    expect(toolEvents[1].command).toBe("view_file");
+    expect(toolEvents[1].args).toEqual(["src/view.ts"]);
+    expect(toolEvents[2].command).toBe("Write");
+    expect(toolEvents[2].args).toEqual(["src/written.ts"]);
+    expect(toolEvents[3].command).toBe("Edit");
+    expect(toolEvents[3].args).toEqual(["src/edited.ts"]);
   });
 });

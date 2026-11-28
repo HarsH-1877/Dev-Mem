@@ -65,6 +65,48 @@ function defaultCliLookup(bin: CliAgentKind): boolean {
   }
 }
 
+export interface WindowsCliResolution {
+  command: string;
+  shell: boolean;
+}
+
+/**
+ * Resolves a host CLI on Windows via `where.exe` so native `.exe` binaries
+ * spawn with `shell: false` (preventing whitespace splitting and Node DEP0190),
+ * while `.cmd`/`.bat` shims retain `shell: true`.
+ */
+export function resolveWindowsCliInvocation(
+  bin: CliAgentKind,
+  whereStdout?: string,
+): WindowsCliResolution {
+  let stdout = whereStdout;
+  if (stdout === undefined) {
+    try {
+      const res = spawnSync("where.exe", [bin], {
+        encoding: "utf8",
+        timeout: 2_000,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      });
+      if (res.status === 0 && res.stdout) {
+        stdout = res.stdout;
+      }
+    } catch {
+      // Fall back to bare command with shell: false
+    }
+  }
+
+  const candidates = (stdout ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const winExec = candidates.find((p) => /\.(exe|com|cmd|bat)$/i.test(p)) ?? candidates[0];
+  if (winExec && /\.(cmd|bat)$/i.test(winExec)) {
+    return { command: bin, shell: true };
+  }
+  return { command: winExec || bin, shell: false };
+}
+
 /**
  * Builds constant non-interactive command flags for the given CLI.
  * The full prompt is passed via stdin rather than argv to avoid shell escaping
@@ -94,7 +136,7 @@ export function buildCliCommandSpec(kind: CliAgentKind, model?: string): CliComm
     case "agy": {
       const args: string[] = [];
       if (model) args.push("--model", model);
-      args.push("-p", "Follow the system instructions and extract JSON strictly from the session log on stdin.");
+      args.push("-p", "Read instructions and input from stdin and respond directly.");
       return { command: "agy", args };
     }
   }
@@ -111,24 +153,28 @@ export function createCliAgentProvider(
   const spec = buildCliCommandSpec(kind, options.model);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const spawnImpl = options.spawnFn ?? spawn;
+  const useWindowsResolution = process.platform === "win32" && !options.spawnFn;
 
   return {
     name: `cli-${kind}`,
     async complete(system: string, prompt: string, _maxTokens: number): Promise<string> {
       const fullPrompt = `${system}\n\n${prompt}`;
+      const target = useWindowsResolution
+        ? resolveWindowsCliInvocation(spec.command)
+        : { command: spec.command, shell: false };
 
       return new Promise<string>((resolve, reject) => {
         let settled = false;
         let stdout = "";
         let stderr = "";
 
-        const child = spawnImpl(spec.command, spec.args, {
+        const child = spawnImpl(target.command, spec.args, {
           cwd: tmpdir(),
           env: {
             ...process.env,
             DEV_MEM_DISABLE_HOOKS: "1",
           },
-          shell: process.platform === "win32",
+          shell: target.shell,
           windowsHide: true,
           stdio: ["pipe", "pipe", "pipe"],
         });

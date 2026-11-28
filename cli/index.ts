@@ -146,7 +146,7 @@ export async function runCli(
       const { installedAgents: agents, defaultedToClaude } = installHooks(cwd, args);
       let out = `${getBanner()}\n\ndev-memo hooks installed (agents: ${agents.join(", ")})\n`;
       if (defaultedToClaude) {
-        out += `\n[Notice]: No agent configuration folders were detected, so dev-memo defaulted to claude-code.\nIf you are using a different agent, specify it explicitly:\n  dev-memo install codex\n  dev-memo install cursor\n`;
+        out += `\n[Notice]: No agent configuration folders were detected, so dev-memo defaulted to claude-code.\nIf you are using a different agent, specify it explicitly:\n  dev-memo install codex\n  dev-memo install cursor\n  dev-memo install opencode\n  dev-memo install antigravity\n`;
       }
       if (agents.includes("cursor")) {
         out += `\n[Notice for Cursor]: Cursor CLI lacks a reliable SessionEnd event.\nDev-Memo uses an N-accumulated-events trigger (default 10) instead.\nFor a perfect flush when exiting, run your agent via: dev-memo wrap cursor-agent <args>\n`;

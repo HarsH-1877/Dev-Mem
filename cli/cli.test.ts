@@ -920,6 +920,44 @@ describe("Antigravity CLI support in install, init, mcp, doctor, and uninstall",
     expect(res.stdout).toContain("agents: antigravity");
     expect(existsSync(join(dir, ".agents", "hooks.json"))).toBe(true);
   });
+
+  it("auto-infers antigravity in runCli(['init']) from .agents/ or GEMINI.md and keeps PreToolUse wrapper fail-open", async () => {
+    const dirWithAgents = mkdtempSync(join(tmpdir(), "dm-cli-init-agents-"));
+    const dirWithGemini = mkdtempSync(join(tmpdir(), "dm-cli-init-gemini-"));
+    const brokenDist = mkdtempSync(join(tmpdir(), "dm-broken-dist-"));
+    try {
+      initGitRepo(dirWithAgents);
+      mkdirSync(join(dirWithAgents, ".agents"), { recursive: true });
+      const initAgents = await runCli(["init", "--no-bootstrap"], { cwd: dirWithAgents });
+      expect(initAgents.exitCode).toBe(0);
+      expect(initAgents.stdout).toContain("Hooks installed: antigravity");
+      expect(initAgents.stdout).toContain("MCP registered: .agents/mcp_config.json");
+
+      initGitRepo(dirWithGemini);
+      writeFileSync(join(dirWithGemini, "GEMINI.md"), "- Keep hooks fail-open.\n", "utf8");
+      const initGemini = await runCli(["init", "--no-bootstrap"], { cwd: dirWithGemini });
+      expect(initGemini.exitCode).toBe(0);
+      expect(initGemini.stdout).toContain("Hooks installed: antigravity");
+      expect(initGemini.stdout).toContain("MCP registered: .agents/mcp_config.json");
+
+      // Generated PreToolUse wrapper must fail-open when hook.js cannot be imported
+      mkdirSync(join(brokenDist, "adapters"), { recursive: true });
+      const { spawnSync } = await import("node:child_process");
+      const preToolWrapper = join(dirWithAgents, ".agents", "hooks", "dev-mem-pre-tool-use.js");
+      const failOpenRes = spawnSync(process.execPath, [preToolWrapper], {
+        cwd: dirWithAgents,
+        input: JSON.stringify({ conversationId: "conv-wrap", workspacePaths: [dirWithAgents] }),
+        env: { ...process.env, DEV_MEM_DIST_DIR: brokenDist, DEV_MEM_SKIP_NPM: "1" },
+        encoding: "utf8",
+      });
+      expect(failOpenRes.status).toBe(0);
+      expect(JSON.parse(failOpenRes.stdout)).toEqual({ decision: "allow" });
+    } finally {
+      rmSync(dirWithAgents, { recursive: true, force: true });
+      rmSync(dirWithGemini, { recursive: true, force: true });
+      rmSync(brokenDist, { recursive: true, force: true });
+    }
+  });
 });
 
 

@@ -1,9 +1,9 @@
-import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { acquireExtractionLock, markExtractionComplete } from "../../core/extraction-lock.js";
 import { pruneExtractedEvents } from "../../core/capture/compact.js";
 import { runExtraction } from "../../core/extraction/index.js";
 import { EventLog } from "../../core/capture/log.js";
+import { getEventsLogPath } from "../../core/local-data.js";
 
 export async function extractOnce(cwd: string, sessionId: string): Promise<{ skipped: boolean; success: boolean }> {
   let release: (() => void) | null;
@@ -39,7 +39,7 @@ export function runWrap(cwd: string, args: string[]): Promise<{ exitCode: number
 
     child.on("close", async (code) => {
       try {
-        const log = new EventLog({ persistPath: join(cwd, ".dev-mem", "events.jsonl") });
+        const log = new EventLog({ persistPath: getEventsLogPath(cwd) });
         const events = log.getEvents();
         if (events.length > 0) {
           const lastSessionId = events[events.length - 1].session_id;

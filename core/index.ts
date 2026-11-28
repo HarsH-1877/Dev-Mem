@@ -18,11 +18,14 @@ export {
 } from "./lifecycle/index.js";
 export {
   ensureLocalDataDir,
+  getDevMemDir,
   getGraphDbPath,
   getEventsLogPath,
   getExtractionLogPath,
   getMemoryMarkdownPath,
+  isLinkedWorktree,
   readLastExtractionLog,
+  resolveStorageRoot,
   MEMORY_MD_FILENAME,
   type ExtractionLogEntry,
 } from "./local-data.js";

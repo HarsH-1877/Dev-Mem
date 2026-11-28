@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventLog } from "./capture/log.js";
 import { extractionStatePath, isExtractionComplete } from "./extraction-lock.js";
+import { getEventsLogPath } from "./local-data.js";
 
 /** Total re-triggers allowed per session after the original attempt failed or never ran. */
 export const MAX_RETRY_ATTEMPTS = 3;
@@ -25,7 +26,7 @@ function readAttempts(projectRoot: string, sessionId: string): number {
  * window, and extracting them early would lose their later events.
  */
 export function findPendingSessions(projectRoot: string, currentSessionId: string): string[] {
-  const logPath = join(projectRoot, ".dev-mem", "events.jsonl");
+  const logPath = getEventsLogPath(projectRoot);
   if (!existsSync(logPath)) return [];
 
   const counts = new Map<string, number>();

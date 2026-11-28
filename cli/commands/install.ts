@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureLocalDataDir } from "../../core/local-data.js";
+import { ensureLocalDataDir, getDevMemDir, isLinkedWorktree } from "../../core/local-data.js";
 import { buildResolverSource, HOOK_MARKER } from "../hook-resolver.js";
 
 function adapterHook(adapter: "claude-code" | "codex" | "cursor"): string {
@@ -286,7 +286,7 @@ export function installHooks(cwd: string, requestedAgents: string[]): { installe
   try {
     const currentDir = dirname(fileURLToPath(import.meta.url));
     const distDir = join(currentDir, "../..").replace(/\\/g, "/");
-    writeFileSync(join(cwd, ".dev-mem", "install-path.txt"), distDir, "utf8");
+    writeFileSync(join(getDevMemDir(cwd), "install-path.txt"), distDir, "utf8");
   } catch {}
 
   return { installedAgents, defaultedToClaude };
@@ -408,8 +408,8 @@ export function uninstallHooks(cwd: string, purge: boolean): void {
   if (existsSync(join(cwd, ".cursor"))) uninstallCursorHooks(cwd);
   if (existsSync(join(cwd, ".opencode")) || existsSync(join(cwd, "opencode.json"))) uninstallOpenCodeHooks(cwd);
 
-  if (purge) {
-    const devMemDir = join(cwd, ".dev-mem");
+  if (purge && !isLinkedWorktree(cwd)) {
+    const devMemDir = getDevMemDir(cwd);
     if (existsSync(devMemDir)) rmSync(devMemDir, { recursive: true, force: true });
   }
 }

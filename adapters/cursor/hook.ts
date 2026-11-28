@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { DeterministicCapture } from "../../core/capture/index.js";
 import { retryPendingExtractions } from "../../core/extraction-retry.js";
 import { EventLog } from "../../core/capture/log.js";
+import { getEventsLogPath } from "../../core/local-data.js";
 import { getExtractionEventThreshold } from "../../core/checkpoint.js";
 import { numberFor, parseHookPayload, recordFor, stringFor } from "../../core/hook-safety.js";
 import type { CursorHookInput } from "./types.js";
@@ -35,7 +36,7 @@ function parseInput(): CursorHookInput | null {
 
 async function triggerExtractionIfThresholdMet(projectRoot: string, sessionId: string) {
   try {
-    const log = new EventLog({ persistPath: join(projectRoot, ".dev-mem", "events.jsonl") });
+    const log = new EventLog({ persistPath: getEventsLogPath(projectRoot) });
     if (!log.getEvents().some((event) => event.session_id === sessionId && event.type === "session_start")) {
       console.error(`[dev-mem/cursor] Skipping checkpoint without a prior SessionStart for ${sessionId}`);
       return;

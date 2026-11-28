@@ -1,5 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 
 /** Local data directory at the project root (spec §3.3). */
 export const DEV_MEM_DIR = ".dev-mem";
@@ -10,8 +11,56 @@ export const MEMORY_MD_FILENAME = "MEMORY.md";
 export const EXTRACTION_LOG_FILENAME = "extraction.log";
 export const GITIGNORE_ENTRY = ".dev-mem/*\n!.dev-mem/shared.jsonl\n!.dev-mem/MEMORY.md";
 
+/**
+ * Resolves the canonical repository root where `.dev-mem/` should live.
+ * When invoked inside a linked `git worktree`, resolves `--git-common-dir`
+ * so parallel agent worktrees share one SQLite WAL store automatically
+ * unless `DEV_MEM_ISOLATE_WORKTREE=1` is set.
+ */
+export function resolveStorageRoot(projectRoot: string): string {
+  const resolved = resolve(projectRoot);
+  if (process.env.DEV_MEM_ISOLATE_WORKTREE === "1") {
+    return resolved;
+  }
+
+  try {
+    const dotGit = join(resolved, ".git");
+    if (existsSync(dotGit) && statSync(dotGit).isDirectory()) {
+      return resolved;
+    }
+  } catch {
+    // fall through to git lookup
+  }
+
+  try {
+    const raw = execFileSync("git", ["rev-parse", "--git-common-dir"], {
+      cwd: resolved,
+      encoding: "utf8",
+      timeout: 2000,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    if (!raw) return resolved;
+    const commonDir = resolve(resolved, raw);
+    if (basename(commonDir).toLowerCase() === ".git") {
+      return dirname(commonDir);
+    }
+  } catch {
+    // Non-git directory or git unavailable — keep projectRoot
+  }
+  return resolved;
+}
+
+export function isLinkedWorktree(projectRoot: string): boolean {
+  try {
+    const storageRoot = resolveStorageRoot(projectRoot);
+    return realpathSync(storageRoot) !== realpathSync(resolve(projectRoot));
+  } catch {
+    return resolveStorageRoot(projectRoot) !== resolve(projectRoot);
+  }
+}
+
 export function getDevMemDir(projectRoot: string): string {
-  return join(projectRoot, DEV_MEM_DIR);
+  return join(resolveStorageRoot(projectRoot), DEV_MEM_DIR);
 }
 
 export function getGraphDbPath(projectRoot: string): string {
@@ -78,9 +127,10 @@ export function readLastExtractionLog(projectRoot: string): ExtractionLogEntry |
  * project's `.gitignore` (spec §3.3).
  */
 export function ensureLocalDataDir(projectRoot: string): string {
-  const dir = getDevMemDir(projectRoot);
+  const storageRoot = resolveStorageRoot(projectRoot);
+  const dir = join(storageRoot, DEV_MEM_DIR);
   mkdirSync(dir, { recursive: true });
-  ensureDevMemGitignore(projectRoot);
+  ensureDevMemGitignore(storageRoot);
   return dir;
 }
 

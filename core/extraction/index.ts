@@ -65,7 +65,8 @@ export async function runExtraction(options: ExtractionOptions): Promise<Extract
 
   try {
     // 1. Read events for this session from .dev-mem/events.jsonl
-    const eventLog = new EventLog({ persistPath: `${projectRoot}/.dev-mem/events.jsonl` });
+    const { getEventsLogPath } = await import("../local-data.js");
+    const eventLog = new EventLog({ persistPath: getEventsLogPath(projectRoot) });
     const allEvents = eventLog.getEvents();
     const sessionEvents = allEvents.filter((e) => e.session_id === sessionId);
 

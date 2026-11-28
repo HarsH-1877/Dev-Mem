@@ -23,90 +23,74 @@
 
 ---
 
-Dev-Mem gives your AI coding agents (Claude Code, Cursor, OpenCode, Codex, and MCP tools) persistent project memory that survives session restarts and agent switches. It automatically captures architectural decisions, constraints, and failed approaches while you code — injecting relevant context at session start and as you prompt so your agent never repeats past mistakes or re-investigates solved problems.
+Dev-Mem gives your AI coding agents (**Claude Code, Codex, Cursor, OpenCode, and MCP tools**) a persistent, evidence-backed engineering memory that survives session restarts, agent switches, and parallel Git worktrees.
 
-**100% local, lightweight, and private.** It runs only on-demand with no background servers eating your RAM, works with your existing Claude Code, Codex, or Gemini CLI subscription (no extra API key required), scrubs secrets automatically, and syncs curated knowledge across your team through standard Git commits.
+- **Stop repeating solved investigations:** Relevant architectural decisions, constraints, and discoveries inject automatically at session start and prompt time via SQLite FTS5 + BM25 search.
+- **Catch regressions before editing broken paths:** Mid-session file guards warn when you touch files tied to past `FailedApproach` rollbacks — gated by topical similarity and deduplicated per session.
+- **Day-one memory with zero extra API keys:** `dev-memo init` wires hooks + MCP, seeds starter rules from Git reverts and `CLAUDE.md` / `AGENTS.md` / `.cursorrules` at `$0` cost, and extracts new session knowledge using your already-authenticated host CLI (`claude`, `codex`, `gemini`) — or optional API keys / local Ollama.
+- **Human governance & Git team sync:** Review pending memories (`dev-memo review`), sync compact tombstoned state (`.dev-mem/shared.jsonl` + git-diffable `.dev-mem/MEMORY.md`), comment on GitHub PRs (`.github/actions/pr-context`), track ROI (`dev-memo stats`), and inspect the graph offline (`dev-memo view`).
+- **100% local & lightweight:** Zero background daemons, zero open network ports, `better-sqlite3` as the sole runtime dependency, and automatic secret/privacy redaction.
 
 ---
 
 ## Requirements
 
 - Node.js 22+
-- An existing project with at least one of: `.claude/`, `.codex/`, or `.cursor/` already present (or a Claude Code project, which creates `.claude/` automatically)
+- A project using **Claude Code**, **Codex**, **Cursor**, or **OpenCode** (or any MCP-compatible client)
 - An extraction backend — **no extra API key needed** if you already have one of these CLIs authenticated on your `PATH`:
-  - `claude` (Claude Code CLI subscription)
-  - `codex` (Codex CLI subscription)
+  - `claude` (Claude Code CLI)
+  - `codex` (Codex CLI)
   - `gemini` (Gemini CLI)
-- Or optionally configure a direct API key / local model fallback:
+- Optional direct API key / local model fallback:
   - `ANTHROPIC_API_KEY` (default: `claude-haiku-4-5`)
   - `OPENAI_API_KEY` (default: `gpt-5-mini`)
   - `GEMINI_API_KEY` or `GOOGLE_API_KEY` (default: `gemini-3.5-flash`)
-  - `DEV_MEM_LLM_BASE_URL` pointed at any OpenAI-compatible endpoint (Ollama, Groq, OpenRouter, LM Studio, DeepSeek) — no API key required for local Ollama
+  - `DEV_MEM_LLM_BASE_URL` for Ollama, Groq, OpenRouter, LM Studio, or DeepSeek (no key required for Ollama)
 
 ---
 
-## Quick Start (`dev-memo init`)
-
-Install Dev-Mem globally (or run with `npx`):
+## 30-Second Quick Start (`dev-memo init`)
 
 ```bash
 npm install -g dev-memo
 dev-memo init
 ```
 
-`dev-memo init` sets up everything in one step:
-1. Detects your installed agents (or infers from `claude` / `codex` on your `PATH`; pass explicit agents like `dev-memo init cursor` if desired).
-2. Wires lifecycle hooks and ensures `.dev-mem/` is configured properly in `.gitignore`.
-3. Automatically registers `dev-memo mcp` in project MCP configs (`.mcp.json`, `.cursor/mcp.json`, `opencode.json`).
-4. Verifies your extraction backend (zero-key host CLI, API key, or Ollama).
-5. Runs `dev-memo bootstrap` to seed starter memories from past Git reverts and repo rule files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`) so your very first prompt already has context.
+`dev-memo init` sets up your repo in one command:
+1. Detects installed agents (or infers `claude-code` / `codex` from your `PATH`; pass explicit names like `dev-memo init cursor` if needed).
+2. Wires lifecycle hooks and updates `.gitignore` (`.dev-mem/*` ignored locally while un-ignoring `.dev-mem/shared.jsonl` and `.dev-mem/MEMORY.md`).
+3. Registers `dev-memo mcp` in `.mcp.json`, `.cursor/mcp.json`, and `opencode.json`.
+4. Verifies your extraction backend (`cli-claude`, `cli-codex`, `cli-gemini`, API key, or Ollama).
+5. Runs `dev-memo bootstrap` to mine past Git reverts and repository rules (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`) so your very first prompt already has context.
 
-*(Use `--no-mcp` or `--no-bootstrap` to skip those steps, or run `dev-memo install [agent...]` to manage only hooks.)*
+*(Pass `--no-mcp` or `--no-bootstrap` to skip those steps, or use `dev-memo install [agent...]` to manage only hooks.)*
 
-Dev-Mem automatically detects which agent directories exist in your project. However, since agents like Codex and Cursor do not auto-create their directories in every repository by default, **you can explicitly specify your agent**:
-
-```bash
-dev-memo install codex
-# or
-dev-memo install cursor
-```
-
-| Agent Requested / Detected | What it installs |
+| Agent | Hooks Installed |
 |---|---|
-| `claude-code` (or nothing found) | Claude Code hooks into `.claude/settings.json` and `.claude/hooks/` (SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd) |
-| `codex` | Codex hooks into `.codex/hooks.json` and `.codex/hooks/` (SessionStart, PreToolUse, PostToolUse, Stop, SessionEnd) |
-| `cursor` | Cursor hooks into `.cursor/hooks.json` and `.cursor/hooks/` (SessionStart, PreToolUse, PostToolUse, Stop) |
-| `opencode` | OpenCode plugin into `.opencode/plugins/dev-mem.ts` and `opencode.json` |
+| `claude-code` (default fallback) | `.claude/settings.json` + `.claude/hooks/` (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `SessionEnd`) |
+| `codex` | `.codex/hooks.json` + `.codex/hooks/` (`SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `SessionEnd`) |
+| `cursor` | `.cursor/hooks.json` + `.cursor/hooks/` (`SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`) |
+| `opencode` | `.opencode/plugins/dev-mem.ts` + `opencode.json` (`chat.message`, `tool.execute.after`, `session.idle`) |
 
-If multiple agent directories exist, hooks are installed for all of them.
-
-**Example output — Claude Code only:**
-
-```
-dev-memo hooks installed (agents: claude-code)
-```
-
-**Example output — with Cursor detected:**
-
-```
-dev-memo hooks installed (agents: claude-code, cursor)
-
-[Notice for Cursor]: Cursor CLI lacks a reliable SessionEnd event.
-Dev-Mem uses an N-accumulated-events trigger (default 10) instead.
-For a perfect flush when exiting, run your agent via: dev-memo wrap cursor-agent <args>
-```
-
-Dev-Mem also creates `.dev-mem/` at the project root (gitignored by default) and adds `.dev-mem/` to `.gitignore` if it isn't already there.
-
-**Reinstalling:** running `npx dev-memo install` again is safe — it won't duplicate hooks if they're already present.
-
-### Upgrading to 0.4.0
-
-After upgrading, run `dev-memo install` once in each project to register the new `UserPromptSubmit` prompt-time injection hook for Claude Code. Run `dev-memo sync` to initialize `.dev-mem/shared.jsonl` if you want to share curated project decisions and conventions with your team via Git. Upgraded hooks contain no machine-specific paths and are safe to commit for your whole team.
+If multiple agent directories exist, hooks are installed for all of them. Running `dev-memo install` again is safe and idempotent.
 
 ---
 
 ## CLI commands
+
+### `dev-memo stats` & `dev-memo view`
+
+Inspect local ROI telemetry and explore your knowledge graph offline with zero background servers:
+
+```bash
+# Show nodes, verification ratio, injections, warnings surfaced, and extraction health
+dev-memo stats
+dev-memo stats --json
+
+# Generate self-contained offline HTML graph explorer at .dev-mem/report.html
+dev-memo view
+dev-memo view --open
+```
 
 ### `dev-memo bootstrap [--from <file>]`
 

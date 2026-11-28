@@ -23,6 +23,7 @@ export {
   getEventsLogPath,
   getExtractionLogPath,
   getMemoryMarkdownPath,
+  getTelemetryLogPath,
   isLinkedWorktree,
   readLastExtractionLog,
   resolveStorageRoot,
@@ -65,6 +66,19 @@ export {
   type PrContextOptions,
   type PrContextResult,
 } from "./ci/pr-context.js";
+export {
+  collectStats,
+  recordTelemetryEvent,
+  readTelemetryEvents,
+  type DevMemStats,
+  type TelemetryEvent,
+  type TelemetryEventKind,
+} from "./telemetry/index.js";
+export {
+  generateStaticReport,
+  type StaticReportOptions,
+  type StaticReportResult,
+} from "./view/index.js";
 export {
   bootstrapProject,
   type BootstrapOptions,

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0 — 2026-11-28
+
+### Added
+- **Local ROI Telemetry & `dev-memo stats` (`core/telemetry/index.ts`, `cli/commands/diagnostics.ts`)**: Appends best-effort local usage metrics (`.dev-mem/telemetry.jsonl`) during session node injections and prevented regression warnings, and aggregates live metrics across SQLite nodes/edges, session dedup caches, and extraction logs (`--json` supported).
+- **Zero-Server Static HTML Graph Explorer (`core/view/index.ts`, `dev-memo view`)**: Generates a standalone, zero-CDN interactive graph explorer at `.dev-mem/report.html` (SVG graph visualization, search, type/state filters, and safely escaped JSON evidence inspector), with optional `--out <path>` and `--open`.
+
+### Changed
+- **V1.0 Documentation Overhaul**: Rewrote [README.md](file:///e:/Projects/Dev-Mem/README.md) with outcome-first quick start covering all 23 CLI commands, worktree sharing, PR automation, telemetry, and offline HTML exploration, and finalized [Dev-Mem-Technical-Report.md](file:///e:/Projects/Dev-Mem/docs/Dev-Mem-Technical-Report.md) for `1.0.0`.
+
 ## 0.9.0 — 2026-11-28
 
 ### Added

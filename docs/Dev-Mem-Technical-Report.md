@@ -1,6 +1,6 @@
 # Dev-Mem — Technical Report
 
-**Version:** 0.9.0 (Worktree-Shared Memory, Live Inbox & GitHub PR Context)  
+**Version:** 1.0.0 (General Availability — Telemetry, Static Graph Explorer & Complete Multi-Agent Suite)  
 **Date:** November 2026  
 **Author:** Harsh Asalkar  
 **Repository:** [github.com/HarsH-1877/Dev-Mem](https://github.com/HarsH-1877/Dev-Mem)  
@@ -30,6 +30,7 @@
    - 6.11 Deterministic Cold-Start Bootstrap (`core/bootstrap/`)
    - 6.12 Git-Diffable Markdown Projection & Human Curation
    - 6.13 Worktree-Shared Storage, Live Inbox & PR Context CI
+   - 6.14 Local ROI Telemetry & Static HTML Graph Explorer
 7. [Agent Adapters](#7-agent-adapters)
 8. [CLI Interface](#8-cli-interface)
 9. [Evaluation Methodology & Results](#9-evaluation-methodology--results)
@@ -1116,6 +1117,16 @@ In v0.9.0, Dev-Mem extends single-checkout memory across parallel multi-agent wo
 
 ---
 
+### 6.14 Local ROI Telemetry & Static HTML Graph Explorer
+
+**Locations:** `core/telemetry/index.ts`, `core/view/index.ts`, `cli/commands/diagnostics.ts`
+
+In v1.0.0, Dev-Mem completes observability and visual inspection while preserving zero-daemon and zero-network invariants:
+- **Telemetry & `dev-memo stats`:** Appends lightweight events (`injection`, `regression_warning`, `mcp_query`, `verification`) to `.dev-mem/telemetry.jsonl` via `recordTelemetryEvent()` inside `filterUnseenNodes()` / `filterUnseenWarnings()` and computes live totals (sessions assisted, injections served, regression warnings surfaced, verification ratios, extraction success/failure counts) across SQLite, session files, and `extraction.log`.
+- **Zero-Server Graph Explorer (`dev-memo view`):** Generates `.dev-mem/report.html`, a self-contained single-file HTML/CSS/SVG explorer embedding safely escaped (`\u003c`) JSON graph data with zero external CDN requests, searchable filters by node type and lifecycle state, SVG topology rendering, and full evidence inspection.
+
+---
+
 ## 7. Agent Adapters
 
 **Location:** `adapters/`
@@ -1207,6 +1218,8 @@ Hooks are **best-effort observers** and must never terminate or disrupt the host
 | `dev-memo install [agent...]` | Detect or target agents, wire hooks, create `.dev-mem/` | `dev-memo install` |
 | `dev-memo bootstrap [--from f]` | Mine git reverts, repo instructions, and `--claude-memory` ($0 LLM cost) | `dev-memo bootstrap --claude-memory` |
 | `dev-memo status` | Show graph size, lifecycle breakdown, last capture & extraction | `dev-memo status` |
+| `dev-memo stats [--json]` | Show sessions assisted, injections served, regressions warned, and verifications | `dev-memo stats --json` |
+| `dev-memo view [--open]` | Generate zero-server static HTML graph explorer (`.dev-mem/report.html`) | `dev-memo view --open` |
 | `dev-memo doctor [--live]` | Check git, hooks currency, resolver health, and LLM configuration | `dev-memo doctor --live` |
 | `dev-memo query "<text>"` | Preview what context would be injected for a task | `dev-memo query "optimize database queries"` |
 | `dev-memo list [--state s]` | List stored nodes with short IDs, types, and lifecycle states | `dev-memo list --state observed` |
@@ -1445,11 +1458,9 @@ dev-memo inspect <node-id>
 
 In v0.6.0, `dev-memo init [agent...]` infers `claude-code` or `codex` from installed host CLIs on `PATH` when no `.claude/`, `.codex/`, `.cursor/`, or `.opencode/` directories exist yet, creates missing agent directories automatically, registers `dev-memo mcp`, verifies the extraction backend, and seeds initial project memory via `dev-memo bootstrap`. Explicit agent lists (`dev-memo init codex cursor`) remain supported.
 
-### 11.2 No Embedding-Based Retrieval
+### 11.2 Semantic Retrieval Scope (Upgraded in v0.8.0)
 
-Retrieval scoring uses Jaccard similarity on tokenized text — a bag-of-words approach. This works for exact and near-exact keyword matches but misses semantic similarity. "optimize database performance" would not match a node titled "PostgreSQL query tuning" unless they share literal tokens.
-
-**Trade-off:** Zero external dependencies and no embedding model requirement. Adequate for V1/V2 graph sizes (< 100 nodes).
+v0.8.0 replaced pure bag-of-words Jaccard with a hybrid SQLite FTS5/BM25 index (`nodes_fts`, Porter stemming, camelCase expansion, field weights across title/symbols/files/content) combined with calibrated topical gating (`>= 0.07`) and parent-directory proximity credit (`95.2%` Hit@1, `0.952` MRR, `0.0%` noise leakage across 24 evaluated sessions). Purely synonymous phrases without shared stems or symbols remain an intentional zero-dependency trade-off vs. embedding models.
 
 ### 11.3 Symbol-Level Grounding (Delivered in v0.4.0)
 
@@ -1461,9 +1472,9 @@ Cursor's CLI does not reliably fire a `SessionEnd` event when the process exits.
 
 **Mitigation:** `dev-memo wrap cursor-agent <args>` provides reliable end-of-session extraction.
 
-### 11.5 No Team / Multi-Developer Sync
+### 11.5 Team & Worktree Memory Sync (Delivered in v0.4.0–v0.9.0)
 
-`.dev-mem/` is gitignored by default. Knowledge is strictly per-machine. Shared team memory sync (`core/sync/`) is scheduled for delivery in Phase 5.
+`.dev-mem/graph.sqlite` and `.dev-mem/events.jsonl` remain local, while curated state syncs through `.dev-mem/shared.jsonl` (with LWW content updates and tombstones) and git-diffable `.dev-mem/MEMORY.md` (`dev-memo sync` / `export --md`). Across parallel local checkouts, `resolveStorageRoot()` shares one WAL SQLite DB via `git rev-parse --git-common-dir` and `dev-memo pr-context` surfaces constraints directly on GitHub Pull Requests.
 
 ### 11.6 SQLite as Graph Backend
 
@@ -1481,15 +1492,14 @@ For long sessions, raw event logs previously caused prompt bloat. In v0.4.0, Dev
 
 ## 12. Roadmap & Vision
 
-### 12.1 Immediate Next Steps
+### 12.1 Post-1.0 Exploration Backlog
 
 | Priority | Item | Description |
 |----------|------|-------------|
-| **P0** | CLI `--agent` flag | `dev-memo install --agent codex` automatically creates the directory and wires hooks, eliminating the manual `mkdir` step |
-| **P0** | CLI `--all` flag | `dev-memo install --all` installs hooks for every supported agent regardless of existing directories |
-| **P1** | Memory pruning / decay | Automatic garbage collection of old, low-confidence, never-retrieved nodes |
-| **P1** | Windsurf / Aider adapters | Expand agent support to cover the broader AI coding tool ecosystem |
-| **P2** | Embedding-based retrieval | Optional semantic similarity scoring using local embedding models (e.g., via Ollama) |
+| **Post-1.0** | Extra native IDE adapters | Windsurf / Cline / Copilot CLI hook adapters complementing existing MCP support |
+| **Post-1.0** | User-global & package scopes | Optional `~/.dev-mem/` personal conventions and monorepo package-scoped memory |
+| **Post-1.0** | Local embedding reranker | Opt-in Ollama/local embeddings if FTS5/BM25 leaves measured recall gaps |
+| **Post-1.0** | Automated decay GC | Scheduled archival of aged, never-retrieved low-confidence nodes |
 
 ### 12.2 V3 — Symbol-Level Grounding (Conditional)
 
@@ -1541,4 +1551,4 @@ V3 should only begin if V1/V2 evaluation data shows file/commit-level grounding 
 
 ---
 
-*End of technical report. Version 0.2.1, September 2026.*
+*End of technical report. Version 1.0.0, November 2026.*

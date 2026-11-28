@@ -9,6 +9,7 @@ export const EVENTS_LOG_FILENAME = "events.jsonl";
 export const SHARED_GRAPH_FILENAME = "shared.jsonl";
 export const MEMORY_MD_FILENAME = "MEMORY.md";
 export const EXTRACTION_LOG_FILENAME = "extraction.log";
+export const TELEMETRY_LOG_FILENAME = "telemetry.jsonl";
 export const GITIGNORE_ENTRY = ".dev-mem/*\n!.dev-mem/shared.jsonl\n!.dev-mem/MEMORY.md";
 
 /**
@@ -89,6 +90,10 @@ export function getMemoryMarkdownPath(projectRoot: string): string {
 
 export function getExtractionLogPath(projectRoot: string): string {
   return join(getDevMemDir(projectRoot), EXTRACTION_LOG_FILENAME);
+}
+
+export function getTelemetryLogPath(projectRoot: string): string {
+  return join(getDevMemDir(projectRoot), TELEMETRY_LOG_FILENAME);
 }
 
 export interface ExtractionLogEntry {

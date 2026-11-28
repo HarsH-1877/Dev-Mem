@@ -459,3 +459,115 @@ describe("Morphological stemming and lifecycle filtering (v0.4)", () => {
   });
 });
 
+describe("Relevance gating, type-aware decay, and grounded multiplier (v0.5)", () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), "dev-mem-v05-ret-"));
+    initGitRepo(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it("filters out zero-relevance fresh nodes when minRelevance is specified", () => {
+    const store = new GraphStore({ projectRoot: testDir });
+    const freshUnrelated = store.createNode({
+      type: "Decision",
+      title: "Configure PostgreSQL connection pool size",
+      content: "Use max 20 connections in production",
+      lifecycle_state: "verified",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["src/db/pool.ts"],
+        session_id: "s1",
+        agent: "claude-code",
+        timestamp: new Date().toISOString(),
+        confidence: 0.95,
+      },
+    });
+    const relevant = store.createNode({
+      type: "Decision",
+      title: "Use Tailwind CSS utility classes for modal styling",
+      content: "Keep CSS bundle minimal with Tailwind classes",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "2222222222222222222222222222222222222222",
+        files: ["src/ui/modal.tsx"],
+        session_id: "s1",
+        agent: "claude-code",
+        timestamp: new Date().toISOString(),
+        confidence: 0.8,
+      },
+    });
+    store.close();
+
+    // Even without files (proximity=0.5), minRelevance excludes the unrelated PostgreSQL node
+    const gated = retrieveContext({
+      projectRoot: testDir,
+      currentTask: "fix modal styling CSS Tailwind",
+      minRelevance: 0.08,
+    });
+    expect(gated.map((n) => n.id)).toEqual([relevant.id]);
+    expect(gated[0].relevance).toBeGreaterThanOrEqual(0.08);
+
+    const noMatch = retrieveContext({
+      projectRoot: testDir,
+      currentTask: "refactor Kubernetes helm charts",
+      minRelevance: 0.08,
+    });
+    expect(noMatch).toEqual([]);
+    expect(freshUnrelated.id).toBeTruthy();
+  });
+
+  it("applies slower freshness decay to Constraint/Convention/Decision than Discovery/OpenIssue", () => {
+    const store = new GraphStore({ projectRoot: testDir });
+    const oldDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+
+    const oldConstraint = store.createNode({
+      type: "Constraint",
+      title: "Never edit database migrations manually",
+      content: "All schema changes go through migration generator",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["db/migrations.ts"],
+        session_id: "s1",
+        agent: "claude-code",
+        timestamp: oldDate,
+        confidence: 0.85,
+      },
+      created_at: oldDate,
+      updated_at: oldDate,
+    });
+
+    const oldDiscovery = store.createNode({
+      type: "Discovery",
+      title: "Temporary database migrations logging quirk",
+      content: "Schema changes logged twice in dev mode",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "2222222222222222222222222222222222222222",
+        files: ["db/migrations.ts"],
+        session_id: "s1",
+        agent: "claude-code",
+        timestamp: oldDate,
+        confidence: 0.85,
+      },
+      created_at: oldDate,
+      updated_at: oldDate,
+    });
+    store.close();
+
+    const results = retrieveContext({
+      projectRoot: testDir,
+      currentTask: "database migrations schema changes",
+      budgetTokens: 2000,
+    });
+    const cRes = results.find((r) => r.id === oldConstraint.id)!;
+    const dRes = results.find((r) => r.id === oldDiscovery.id)!;
+    expect(cRes.score).toBeGreaterThan(dRes.score + 0.1);
+  });
+});
+

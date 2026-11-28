@@ -27,6 +27,9 @@ export function validateEvidence(evidence: Evidence): void {
       throw new Error("evidence.symbols must be an array of strings when present");
     }
   }
+  if (evidence.grounded !== undefined && typeof evidence.grounded !== "boolean") {
+    throw new Error("evidence.grounded must be a boolean when present");
+  }
   if (typeof evidence.session_id !== "string" || evidence.session_id.trim() === "") {
     throw new Error("evidence.session_id is required");
   }
@@ -65,6 +68,9 @@ export function normalizeEvidence(evidence: Evidence): Evidence {
   }
   if (evidence.symbols !== undefined) {
     normalized.symbols = [...evidence.symbols];
+  }
+  if (evidence.grounded !== undefined) {
+    normalized.grounded = evidence.grounded;
   }
   return normalized;
 }

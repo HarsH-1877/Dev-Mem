@@ -8,6 +8,18 @@ function seenFilePath(projectRoot: string, sessionId: string): string {
 }
 
 /**
+ * Returns true if any nodes have already been injected during `sessionId`.
+ */
+export function hasSessionInjections(projectRoot: string, sessionId: string): boolean {
+  if (!sessionId) return false;
+  try {
+    return existsSync(join(projectRoot, ".dev-mem", "sessions", `${encodeURIComponent(sessionId)}.injected.json`));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Filters a candidate list of nodes down to those not yet injected during
  * `sessionId`, and records the newly selected node IDs as seen.
  */

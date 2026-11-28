@@ -5,6 +5,12 @@ export interface RetrievalContext {
   projectRoot: string;
   budgetTokens?: number;
   /**
+   * Optional minimum topical relevance [0, 1] required before a candidate can be
+   * selected (prevents fresh high-confidence unrelated nodes from leaking into
+   * prompt-time injections).
+   */
+  minRelevance?: number;
+  /**
    * Optional free-text description of what the agent is about to work on
    * (e.g. from `dev-mem query "<text>"` or a task title from the hook payload).
    * When provided, relevance scoring uses keyword overlap against this text.
@@ -18,6 +24,7 @@ export interface RetrievalContext {
 
 export interface RetrievedNode extends KnowledgeNode {
   score: number;
+  relevance: number;
   cost: number;
 }
 
@@ -167,11 +174,20 @@ function calculateRelevance(
   return 0.5;
 }
 
-function calculateFreshness(timestamp: string): number {
+const FRESHNESS_HALF_LIFE_DAYS: Record<KnowledgeNode["type"], number> = {
+  Constraint: 365,
+  Convention: 365,
+  Decision: 90,
+  FailedApproach: 60,
+  Discovery: 14,
+  OpenIssue: 14,
+};
+
+function calculateFreshness(timestamp: string, type?: KnowledgeNode["type"]): number {
   const ageMs = Date.now() - new Date(timestamp).getTime();
   const ageDays = Math.max(0, ageMs / (1000 * 60 * 60 * 24));
-  // Halves every 7 days: exp(-ln(2)/7 * days)
-  return Math.exp(-(Math.LN2 / 7) * ageDays);
+  const halfLife = (type && FRESHNESS_HALF_LIFE_DAYS[type]) ?? 14;
+  return Math.exp(-(Math.LN2 / halfLife) * ageDays);
 }
 
 function calculateGraphProximity(node: KnowledgeNode, currentFiles?: string[]): number {
@@ -274,9 +290,9 @@ export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
   const budgetTokens = context.budgetTokens ?? adaptiveBudget(nodes.length);
 
   // Score every candidate node
-  const scoredNodes: RetrievedNode[] = nodes.map(node => {
+  let scoredNodes: RetrievedNode[] = nodes.map(node => {
     const relevance  = calculateRelevance(node, currentTask, currentFiles);
-    const freshness  = calculateFreshness(node.updated_at || node.created_at);
+    const freshness  = calculateFreshness(node.updated_at || node.created_at, node.type);
     const confidence = node.evidence.confidence;
     const proximity  = calculateGraphProximity(node, currentFiles);
 
@@ -290,13 +306,19 @@ export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
       node.lifecycle_state === "verified" ? 1.10 :
       node.lifecycle_state === "active" ? 1.05 : 1.0;
 
-    const score = Math.min(1.0, baseScore * lifecycleMultiplier);
+    const groundedMultiplier = node.evidence.grounded === false ? 0.85 : 1.0;
+
+    const score = Math.min(1.0, baseScore * lifecycleMultiplier * groundedMultiplier);
 
     const injectionText = formatNode(node);
     const cost = estimateTokens(injectionText);
 
-    return { ...node, score, cost };
+    return { ...node, score, relevance, cost };
   });
+
+  if (context.minRelevance !== undefined) {
+    scoredNodes = scoredNodes.filter((n) => n.relevance >= context.minRelevance!);
+  }
 
   // Descending score order
   scoredNodes.sort((a, b) => b.score - a.score);

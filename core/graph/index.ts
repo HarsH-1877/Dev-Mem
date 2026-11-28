@@ -126,7 +126,9 @@ export class GraphStore {
     }
 
     const evidence = normalizeEvidence(input.evidence);
-    const timestamp = nowIso();
+    const defaultTs = nowIso();
+    const createdAt = input.created_at ?? defaultTs;
+    const updatedAt = input.updated_at ?? createdAt;
     const state: LifecycleState = input.lifecycle_state ?? "observed";
     if (!isLifecycleState(state)) {
       throw new Error(`Unknown lifecycle state: ${String(state)}`);
@@ -139,8 +141,8 @@ export class GraphStore {
       content: input.content ?? "",
       lifecycle_state: state,
       evidence,
-      created_at: timestamp,
-      updated_at: timestamp,
+      created_at: createdAt,
+      updated_at: updatedAt,
     };
 
     const insert = this.db.transaction(() => {
@@ -163,7 +165,7 @@ export class GraphStore {
       this.db.prepare(
         `INSERT INTO lifecycle_history (node_id, from_state, to_state, timestamp)
          VALUES (?, NULL, ?, ?)`,
-      ).run(node.id, node.lifecycle_state, timestamp);
+      ).run(node.id, node.lifecycle_state, node.created_at);
     });
     insert();
 

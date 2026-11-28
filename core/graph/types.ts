@@ -30,6 +30,7 @@ export interface Evidence {
   diff_ref?: string;
   test_ref?: string;
   symbols?: string[];
+  grounded?: boolean;
   session_id: string;
   agent: string;
   timestamp: string;
@@ -70,6 +71,8 @@ export interface CreateNodeInput {
   evidence: Evidence;
   lifecycle_state?: LifecycleState;
   id?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface CreateEdgeInput {

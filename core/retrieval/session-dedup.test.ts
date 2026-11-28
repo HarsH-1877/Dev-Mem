@@ -149,6 +149,20 @@ describe("Claude Code UserPromptSubmit and OpenCode prompt-time injection with d
 
       expect(runBlank.status).toBe(0);
       expect(runBlank.stdout.trim()).toBe("");
+
+      // Unrelated prompt: should NOT inject the fresh Redis node just because it is recent
+      const runUnrelated = spawnSync(process.execPath, [hookScript], {
+        cwd: dir,
+        input: JSON.stringify({
+          hook_event_name: "UserPromptSubmit",
+          session_id: "sess-prompt-unrelated",
+          cwd: dir,
+          prompt: "Update the footer copyright year in README",
+        }),
+        encoding: "utf8",
+      });
+      expect(runUnrelated.status).toBe(0);
+      expect(runUnrelated.stdout.trim()).toBe("");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

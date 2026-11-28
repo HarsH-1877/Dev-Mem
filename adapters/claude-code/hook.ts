@@ -90,12 +90,13 @@ async function main() {
         const candidates = retrieveContext({
           projectRoot,
           currentTask: promptText,
+          minRelevance: 0.08,
         });
-        // Only inject nodes with meaningful topical relevance (> 0) that haven't been shown yet
+        // Gate was applied on topical relevance inside retrieveContext; dedup unseen nodes
         const unseen = filterUnseenNodes(
           projectRoot,
           payload.session_id,
-          candidates.filter((n) => n.score > 0.35),
+          candidates,
         );
         const contextBlock = generateInjectionString(unseen);
         if (contextBlock) {

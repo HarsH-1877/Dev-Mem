@@ -99,6 +99,7 @@ async function main() {
           projectRoot,
           currentFiles,
           currentTask: trimmedTask,
+          currentSessionId: payload.session_id,
           minRelevance: isFollowUp && trimmedTask ? 0.08 : undefined,
         });
         const unseenNodes = filterUnseenNodes(projectRoot, payload.session_id, nodes);

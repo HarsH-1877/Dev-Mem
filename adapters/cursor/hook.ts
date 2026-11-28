@@ -104,7 +104,11 @@ async function main() {
         );
         const regressionWarning = formatRegressionWarning(regressionMatches);
 
-        const nodes = retrieveContext({ projectRoot, currentFiles });
+        const nodes = retrieveContext({
+          projectRoot,
+          currentFiles,
+          currentSessionId: payload.session_id,
+        });
         const contextBlock = generateInjectionString(nodes);
 
         const additionalContext = [regressionWarning, contextBlock]

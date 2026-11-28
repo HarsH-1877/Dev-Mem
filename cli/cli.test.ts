@@ -790,4 +790,137 @@ describe("dev-memo export --md & sync MEMORY.md integration (v0.7)", () => {
   });
 });
 
+describe("Antigravity CLI support in install, init, mcp, doctor, and uninstall", () => {
+  let dir: string;
+  const saved = { ...process.env };
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "dm-cli-agy-"));
+    initGitRepo(dir);
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    process.env = { ...saved };
+  });
+
+  it("installs .agents/hooks.json (flat lifecycle + matcher tool hooks) and registers .agents/mcp_config.json", async () => {
+    // Seed an unrelated user group in .agents/hooks.json to verify preservation on install & uninstall
+    mkdirSync(join(dir, ".agents"), { recursive: true });
+    writeFileSync(
+      join(dir, ".agents", "hooks.json"),
+      JSON.stringify({ "user-custom": { SessionStart: [{ type: "command", command: "echo hi" }] } }, null, 2),
+      "utf8",
+    );
+
+    const res = await runCli(["init", "antigravity", "--no-bootstrap"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("Hooks installed: antigravity");
+    expect(res.stdout).toContain("MCP registered: .agents/mcp_config.json");
+    expect(existsSync(join(dir, ".agents", "hooks.json"))).toBe(true);
+    expect(existsSync(join(dir, ".agents", "mcp_config.json"))).toBe(true);
+
+    const expectedScripts = [
+      ["SessionStart", "dev-mem-session-start.js"],
+      ["PreInvocation", "dev-mem-pre-invocation.js"],
+      ["PreToolUse", "dev-mem-pre-tool-use.js"],
+      ["PostToolUse", "dev-mem-post-tool-use.js"],
+      ["Stop", "dev-mem-stop.js"],
+    ] as const;
+
+    for (const [eventName, scriptName] of expectedScripts) {
+      const scriptPath = join(dir, ".agents", "hooks", scriptName);
+      expect(existsSync(scriptPath)).toBe(true);
+      const src = readFileSync(scriptPath, "utf8");
+      expect(src).toContain("// dev-mem-hook-v2");
+      expect(src).toContain(`process.argv.push("--event", "${eventName}")`);
+      expect(src).toContain('"antigravity", "hook.js"');
+    }
+
+    const hooksCfg = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf8"));
+    expect(hooksCfg["user-custom"]).toBeDefined();
+
+    // Flat arrays (no matcher, no nested hooks) for SessionStart, PreInvocation, Stop
+    for (const [eventName, scriptName] of [
+      ["SessionStart", "dev-mem-session-start.js"],
+      ["PreInvocation", "dev-mem-pre-invocation.js"],
+      ["Stop", "dev-mem-stop.js"],
+    ]) {
+      const entries = hooksCfg["dev-memo"][eventName];
+      expect(Array.isArray(entries)).toBe(true);
+      expect(entries).toEqual([
+        {
+          type: "command",
+          command: `node .agents/hooks/${scriptName}`,
+          timeout: 5,
+        },
+      ]);
+    }
+
+    // Matcher-wrapped handlers for PreToolUse, PostToolUse
+    for (const [eventName, scriptName] of [
+      ["PreToolUse", "dev-mem-pre-tool-use.js"],
+      ["PostToolUse", "dev-mem-post-tool-use.js"],
+    ]) {
+      const entries = hooksCfg["dev-memo"][eventName];
+      expect(Array.isArray(entries)).toBe(true);
+      expect(entries).toEqual([
+        {
+          matcher: "*",
+          hooks: [
+            {
+              type: "command",
+              command: `node .agents/hooks/${scriptName}`,
+              timeout: 5,
+            },
+          ],
+        },
+      ]);
+    }
+
+    const mcpCfg = JSON.parse(readFileSync(join(dir, ".agents", "mcp_config.json"), "utf8"));
+    expect(mcpCfg.mcpServers["dev-memo"]).toEqual({
+      command: "npx",
+      args: ["-y", "dev-memo", "mcp"],
+    });
+
+    expect(findStaleHooks(dir)).toEqual([]);
+
+    process.env.GEMINI_API_KEY = "test-key";
+    process.env.DEV_MEM_DIST_DIR = join(process.cwd(), "dist");
+    const doc = await runCli(["doctor"], { cwd: dir });
+    expect(doc.exitCode).toBe(0);
+    expect(doc.stdout).toContain("✓ Hooks: antigravity");
+    expect(doc.stdout).toContain("✓ Hooks up to date");
+
+    const un = await runCli(["uninstall"], { cwd: dir });
+    expect(un.exitCode).toBe(0);
+    const cleaned = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf8"));
+    expect(cleaned["dev-memo"]).toBeUndefined();
+    expect(cleaned["user-custom"]).toBeDefined();
+    for (const [, scriptName] of expectedScripts) {
+      expect(existsSync(join(dir, ".agents", "hooks", scriptName))).toBe(false);
+    }
+  });
+
+  it("normalizes agy alias to antigravity and flags stale .agents/hooks files", async () => {
+    const res = await runCli(["install", "agy"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("agents: antigravity");
+    expect(existsSync(join(dir, ".agents", "hooks", "dev-mem-session-start.js"))).toBe(true);
+
+    writeFileSync(join(dir, ".agents", "hooks", "dev-mem-session-start.js"), "// stale hook\n", "utf8");
+    expect(findStaleHooks(dir)).toEqual([".agents/hooks/dev-mem-session-start.js"]);
+  });
+
+  it("auto-detects antigravity when GEMINI.md exists", async () => {
+    writeFileSync(join(dir, "GEMINI.md"), "- Always keep hooks fail-open.\n", "utf8");
+    const res = await runCli(["install"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("agents: antigravity");
+    expect(existsSync(join(dir, ".agents", "hooks.json"))).toBe(true);
+  });
+});
+
+
 

@@ -90,6 +90,7 @@ export async function runDoctor(cwd: string, opts: { live?: boolean } = {}): Pro
     ["codex", ".codex/hooks"],
     ["cursor", ".cursor/hooks"],
     ["opencode", ".opencode/plugins"],
+    ["antigravity", ".agents/hooks"],
   ]
     .filter(([, rel]) => {
       try {

@@ -1,6 +1,7 @@
 node_modules/
 dist/
-.dev-mem/
+.dev-mem/*
+!.dev-mem/shared.jsonl
 .claude/
 .codex/
 .cursor/
@@ -10,3 +11,4 @@ test-*/
 
 test-sandbox/
 *.tgz
+

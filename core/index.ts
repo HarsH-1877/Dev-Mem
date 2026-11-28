@@ -75,6 +75,11 @@ export {
   type TelemetryEventKind,
 } from "./telemetry/index.js";
 export {
+  generateStaticReport,
+  type StaticReportOptions,
+  type StaticReportResult,
+} from "./view/index.js";
+export {
   bootstrapProject,
   type BootstrapOptions,
   type BootstrapResult,

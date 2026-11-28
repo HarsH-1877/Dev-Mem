@@ -780,6 +780,14 @@ describe("dev-memo export --md & sync MEMORY.md integration (v0.7)", () => {
     expect(parsed.totalNodes).toBe(1);
     expect(parsed.verifiedNodes).toBe(1);
   });
+
+  it("generates zero-server static HTML report via dev-memo view", async () => {
+    const outPath = join(dir, ".dev-mem", "custom-report.html");
+    const res = await runCli(["view", "--out", outPath], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(existsSync(outPath)).toBe(true);
+    expect(readFileSync(outPath, "utf8")).toContain("Keep WAL enabled");
+  });
 });
 
 

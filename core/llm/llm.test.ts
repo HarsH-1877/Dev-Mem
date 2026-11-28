@@ -59,21 +59,43 @@ describe("LLM Provider Resolution", () => {
 
       const provider = resolveProvider({
         sessionAgent: "cursor",
-        availableClis: ["gemini"],
+        availableClis: ["agy"],
       });
       expect(provider?.name).toBe("anthropic");
 
       delete process.env.ANTHROPIC_API_KEY;
       const cliFallback = resolveProvider({
         sessionAgent: "cursor",
-        availableClis: ["gemini"],
+        availableClis: ["agy"],
       });
-      expect(cliFallback?.name).toBe("cli-gemini");
+      expect(cliFallback?.name).toBe("cli-agy");
     } finally {
       if (saved.ANTHROPIC_API_KEY === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = saved.ANTHROPIC_API_KEY;
       if (saved.OPENAI_API_KEY === undefined) delete process.env.OPENAI_API_KEY;
       else process.env.OPENAI_API_KEY = saved.OPENAI_API_KEY;
+      Object.assign(process.env, saved);
+    }
+  });
+
+  it("resolves Antigravity agy CLI provider for antigravity session and explicit overrides", () => {
+    const saved = { ...process.env };
+    try {
+      delete process.env.DEV_MEM_LLM_PROVIDER;
+      delete process.env.DEV_MEM_LLM_API_KEY;
+      delete process.env.DEV_MEM_LLM_BASE_URL;
+      delete process.env.DEV_MEM_DISABLE_CLI_LLM;
+
+      const sessionProvider = resolveProvider({
+        sessionAgent: "antigravity",
+        availableClis: ["claude", "agy"],
+      });
+      expect(sessionProvider?.name).toBe("cli-agy");
+
+      expect(resolveProvider({ provider: "cli-agy" })?.name).toBe("cli-agy");
+      expect(resolveProvider({ provider: "agy" })?.name).toBe("cli-agy");
+      expect(resolveProvider({ provider: "cli-gemini" })?.name).toBe("cli-agy");
+    } finally {
       Object.assign(process.env, saved);
     }
   });

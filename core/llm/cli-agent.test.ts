@@ -40,11 +40,15 @@ describe("Zero-API-key host CLI LLM provider", () => {
   it("maps session agent names to host CLI kinds", () => {
     expect(mapSessionAgentToCli("claude-code")).toBe("claude");
     expect(mapSessionAgentToCli("codex")).toBe("codex");
-    expect(mapSessionAgentToCli("gemini")).toBe("gemini");
+    expect(mapSessionAgentToCli("antigravity")).toBe("agy");
+    expect(mapSessionAgentToCli("agy")).toBe("agy");
+    expect(mapSessionAgentToCli("antigravity-cli")).toBe("agy");
+    expect(mapSessionAgentToCli("gemini")).toBe("agy");
+    expect(mapSessionAgentToCli("gemini-cli")).toBe("agy");
     expect(mapSessionAgentToCli("cursor")).toBeNull();
   });
 
-  it("builds non-interactive CLI invocations for claude, codex, and gemini", () => {
+  it("builds non-interactive CLI invocations for claude, codex, and agy", () => {
     const claudeSpec = buildCliCommandSpec("claude");
     expect(claudeSpec.command).toBe("claude");
     expect(claudeSpec.args).toContain("-p");
@@ -54,9 +58,21 @@ describe("Zero-API-key host CLI LLM provider", () => {
     expect(codexSpec.command).toBe("codex");
     expect(codexSpec.args).toEqual(["exec", "-m", "gpt-5-mini", "-"]);
 
-    const geminiSpec = buildCliCommandSpec("gemini");
-    expect(geminiSpec.command).toBe("gemini");
-    expect(geminiSpec.args).toContain("-p");
+    const agyDefaultSpec = buildCliCommandSpec("agy");
+    expect(agyDefaultSpec.command).toBe("agy");
+    expect(agyDefaultSpec.args).toContain("-p");
+    expect(agyDefaultSpec.args).not.toContain("--model");
+    expect(agyDefaultSpec.args).not.toContain("--output-format");
+    expect(agyDefaultSpec.args).not.toContain("--tools");
+
+    const agyModelSpec = buildCliCommandSpec("agy", "gemini-3-flash");
+    expect(agyModelSpec.command).toBe("agy");
+    expect(agyModelSpec.args[0]).toBe("--model");
+    expect(agyModelSpec.args[1]).toBe("gemini-3-flash");
+    expect(agyModelSpec.args[2]).toBe("-p");
+    expect(agyModelSpec.args.length).toBe(4);
+    expect(agyModelSpec.args).not.toContain("--output-format");
+    expect(agyModelSpec.args).not.toContain("--tools");
   });
 
   it("spawns in os.tmpdir() with DEV_MEM_DISABLE_HOOKS=1 and pipes prompt via stdin", async () => {
@@ -92,7 +108,7 @@ describe("Zero-API-key host CLI LLM provider", () => {
   });
 
   it("detectAvailableCliAgents returns only binaries resolved successfully", () => {
-    const detected = detectAvailableCliAgents((bin) => bin === "claude" || bin === "gemini");
-    expect(detected).toEqual(["claude", "gemini"]);
+    const detected = detectAvailableCliAgents((bin) => bin === "claude" || bin === "agy");
+    expect(detected).toEqual(["claude", "agy"]);
   });
 });

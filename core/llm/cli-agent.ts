@@ -2,9 +2,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import type { LlmProvider } from "./types.js";
 
-export type CliAgentKind = "claude" | "codex" | "gemini";
+export type CliAgentKind = "claude" | "codex" | "agy";
 
-export const CLI_AGENT_KINDS: readonly CliAgentKind[] = ["claude", "codex", "gemini"];
+export const CLI_AGENT_KINDS: readonly CliAgentKind[] = ["claude", "codex", "agy"];
 
 export interface CliCommandSpec {
   command: CliAgentKind;
@@ -20,7 +20,7 @@ export interface CliAgentProviderOptions {
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 /**
- * Maps a session's agent identifier (e.g. "claude-code", "codex", "gemini")
+ * Maps a session's agent identifier (e.g. "claude-code", "codex", "antigravity", "agy")
  * to a headless host CLI capable of single-turn completion.
  */
 export function mapSessionAgentToCli(sessionAgent?: string): CliAgentKind | null {
@@ -28,7 +28,15 @@ export function mapSessionAgentToCli(sessionAgent?: string): CliAgentKind | null
   const normalized = sessionAgent.trim().toLowerCase();
   if (normalized === "claude-code" || normalized === "claude") return "claude";
   if (normalized === "codex" || normalized === "codex-cli") return "codex";
-  if (normalized === "gemini" || normalized === "gemini-cli") return "gemini";
+  if (
+    normalized === "antigravity" ||
+    normalized === "agy" ||
+    normalized === "antigravity-cli" ||
+    normalized === "gemini" ||
+    normalized === "gemini-cli"
+  ) {
+    return "agy";
+  }
   return null;
 }
 
@@ -83,18 +91,18 @@ export function buildCliCommandSpec(kind: CliAgentKind, model?: string): CliComm
       args.push("-");
       return { command: "codex", args };
     }
-    case "gemini": {
+    case "agy": {
       const args: string[] = [];
-      if (model) args.push("-m", model);
+      if (model) args.push("--model", model);
       args.push("-p", "Follow the system instructions and extract JSON strictly from the session log on stdin.");
-      return { command: "gemini", args };
+      return { command: "agy", args };
     }
   }
 }
 
 /**
  * LlmProvider backed by the developer's already-authenticated host agent CLI
- * (Claude Code, Codex CLI, or Gemini CLI), requiring no second paid API key.
+ * (Claude Code, Codex CLI, or Antigravity CLI), requiring no second paid API key.
  */
 export function createCliAgentProvider(
   kind: CliAgentKind,

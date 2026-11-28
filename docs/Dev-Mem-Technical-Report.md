@@ -1,6 +1,6 @@
 # Dev-Mem — Technical Report
 
-**Version:** 1.0.0 (General Availability — Telemetry, Static Graph Explorer & Complete Multi-Agent Suite)  
+**Version:** 1.1.0 (Antigravity CLI & IDE Integration, Telemetry, Static Graph Explorer & Complete Multi-Agent Suite)  
 **Date:** November 2026  
 **Author:** Harsh Asalkar  
 **Repository:** [github.com/HarsH-1877/Dev-Mem](https://github.com/HarsH-1877/Dev-Mem)  
@@ -61,7 +61,7 @@ Dev-Mem maintains a typed, evidence-linked knowledge graph (`graph.sqlite`) with
 
 ## 2. Problem Statement
 
-AI coding agents — including Claude Code, Cursor, Codex, and OpenCode — lose all higher-level development knowledge between sessions and between tools. Git and the filesystem preserve *what the code currently is*. They do **not** preserve:
+AI coding agents — including Claude Code, Cursor, Codex, OpenCode, and Antigravity — lose all higher-level development knowledge between sessions and between tools. Git and the filesystem preserve *what the code currently is*. They do **not** preserve:
 
 - **Why** an architectural decision was made
 - **What approaches** were already tried and failed, and why
@@ -113,7 +113,7 @@ Dev-Mem is an **npm CLI package** with an internal core library and per-agent ad
 │  bootstrap  │  capture         │  codex/            │
 │  install    │  bootstrap       │  cursor/           │
 │  status     │  extraction      │  opencode/         │
-│  query      │  retrieval       │                    │
+│  query      │  retrieval       │  antigravity/      │
 │  inspect    │  regression      │                    │
 │  uninstall  │  consistency     │                    │
 │  extract    │  lifecycle       │                    │
@@ -133,7 +133,7 @@ These constraints override any individual feature idea. If a feature conflicts w
 | 3 | **Deterministic capture first, LLM second** | Everything capturable from git/filesystem/tool-call events is captured without LLM calls. LLM calls are reserved exclusively for batched knowledge extraction. |
 | 4 | **Local-first, no server** | All data lives in the user's own project (`.dev-mem/`). No hosted backend, no telemetry, no external service dependency. |
 | 5 | **Evidence is mandatory** | Every knowledge item must cite at least a commit/diff/file. No uncorroborated claims enter the graph. |
-| 6 | **Provider-neutral** | Claude Code, Codex, Cursor, and OpenCode are all first-class citizens, not "Claude Code plus adapters bolted on later." |
+| 6 | **Provider-neutral** | Claude Code, Codex, Cursor, OpenCode, and Antigravity are all first-class citizens, not "Claude Code plus adapters bolted on later." |
 
 ### 3.3 Local Data Location
 
@@ -222,19 +222,19 @@ Agent activity
 All agents share the same `.dev-mem/graph.sqlite` in the project root. When Agent A (e.g., Claude Code) records knowledge, Agent B (e.g., Cursor) reads it on next session start.
 
 ```
-  Claude Code         Codex           Cursor          OpenCode
-       │                │                │                │
-       ▼                ▼                ▼                ▼
-  .claude/hooks    .codex/hooks    .cursor/hooks    .opencode/plugins
-       │                │                │                │
-       └────────────────┴────────────────┴────────────────┘
-                                 │
-                                 ▼
-                    ┌─────────────────────────┐
-                    │  .dev-mem/graph.sqlite  │
-                    │  (shared knowledge      │
-                    │   graph)                │
-                    └─────────────────────────┘
+  Claude Code         Codex           Cursor          OpenCode        Antigravity
+       │                │                │                │                │
+       ▼                ▼                ▼                ▼                ▼
+  .claude/hooks    .codex/hooks    .cursor/hooks    .opencode/plugins  .agents/hooks
+       │                │                │                │                │
+       └────────────────┴────────────────┴────────────────┴────────────────┘
+                                         │
+                                         ▼
+                            ┌─────────────────────────┐
+                            │  .dev-mem/graph.sqlite  │
+                            │  (shared knowledge      │
+                            │   graph)                │
+                            └─────────────────────────┘
 ```
 
 ---
@@ -304,8 +304,8 @@ dev-mem/
 │   ├── lifecycle/
 │   │   └── index.ts           # State machine (observed → ... → stale)
 │   ├── llm/
-│   │   ├── index.ts           # Provider resolution (env vars, config file)
-│   │   ├── types.ts           # LlmProvider interface
+│   │   ├── index.ts           # Provider resolution (env vars, config file, host CLIs)
+│   │   ├── cli-agent.ts       # Host CLI provider (claude, codex, agy)
 │   │   ├── anthropic.ts       # Anthropic Claude provider (native fetch)
 │   │   ├── openai.ts          # OpenAI/OpenAI-compatible provider (native fetch)
 │   │   └── gemini.ts          # Google Gemini provider (native fetch)
@@ -325,9 +325,13 @@ dev-mem/
 │   ├── cursor/
 │   │   ├── hook.ts            # Cursor hook handler
 │   │   └── types.ts           # Cursor payload types
-│   └── opencode/
-│       ├── hook.ts            # OpenCode hook handler
-│       └── types.ts           # OpenCode payload types
+│   ├── opencode/
+│   │   ├── hook.ts            # OpenCode hook handler
+│   │   └── types.ts           # OpenCode payload types
+│   └── antigravity/
+│       ├── index.ts           # Antigravity event constants
+│       ├── hook.ts            # Antigravity CLI/IDE hook handler
+│       └── types.ts           # Antigravity camelCase payload types
 ├── eval/
 │   ├── harness/
 │   │   ├── index.ts           # Single-agent eval harness
@@ -783,8 +787,8 @@ Scores are capped at $\le 1.0$, ensuring verified architectural claims naturally
 
 In earlier versions, context injection occurred solely at `SessionStart`. In conversational agent workflows (e.g. Claude Code or OpenCode), a task evolves across dozens of turns. Injecting all context at the start risks either context loss as the window rolls or token bloat.
 
-In v0.4.0, Dev-Mem introduced **Prompt-Time Delta Injection** (refined in v0.5.0):
-- Listens to Claude Code `UserPromptSubmit` and OpenCode `chat.message` events.
+In v0.4.0, Dev-Mem introduced **Prompt-Time Delta Injection** (refined in v0.5.0 and extended to Antigravity in v1.1.0):
+- Listens to Claude Code `UserPromptSubmit`, Antigravity `PreInvocation`, and OpenCode `chat.message` events.
 - Scores the graph against the submitted user prompt as `currentTask`.
 - Gates candidates on raw topical `relevance >= 0.08` (`minRelevance`, added in v0.5.0) **before** knapsack budget selection so fresh, high-confidence nodes with zero topical overlap cannot leak in due to default proximity (`0.5`).
 - Filters surviving candidates through `filterUnseenNodes(projectRoot, sessionId, candidates)` against `.dev-mem/sessions/<session-id>.injected.json`, guaranteeing zero repeated context tokens across turns.
@@ -962,7 +966,7 @@ interface LlmProvider {
 
 | Provider | Config / Env Variable | Default Model | Notes |
 |----------|-----------------------|---------------|-------|
-| **Host Agent CLI (`cli-claude`, `cli-codex`, `cli-gemini`)** | Auto-detected on `PATH` (or `provider: cli-*`) | `haiku` / CLI default | Pipes compacted prompt via `stdin` in `os.tmpdir()` with `DEV_MEM_DISABLE_HOOKS=1` loop guard; uses existing subscription with $0 extra billing. |
+| **Host Agent CLI (`cli-claude`, `cli-codex`, `cli-agy`)** | Auto-detected on `PATH` (or `provider: cli-*`) | `haiku` / CLI default | Pipes compacted prompt via `stdin` in `os.tmpdir()` with `DEV_MEM_DISABLE_HOOKS=1` loop guard; uses existing subscription with $0 extra billing (`agy -p ...` for Antigravity). |
 | **Anthropic** | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` | Direct Messages API via fetch |
 | **OpenAI** | `OPENAI_API_KEY` | `gpt-5-mini` | Chat Completions API via fetch |
 | **Gemini** | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3.5-flash` | Generative Language API via fetch |
@@ -972,11 +976,11 @@ interface LlmProvider {
 
 Provider resolution follows a deterministic priority order (explicit overrides win; zero-key session CLI precedes ambient env keys):
 
-1. Explicit `provider` / `DEV_MEM_LLM_PROVIDER` (or `.dev-mem/config.yml` `llm_provider`)
+1. Explicit `provider` / `DEV_MEM_LLM_PROVIDER` (or `.dev-mem/config.yml` `llm_provider`; `cli-gemini` also maps to `cli-agy` for backwards compatibility)
 2. Explicit `DEV_MEM_LLM_BASE_URL` / config `llm_base_url`
-3. Host agent CLI matching `sessionAgent` (`claude-code` → `claude`, `codex` → `codex`, `gemini` → `gemini`), unless `DEV_MEM_DISABLE_CLI_LLM=1`
+3. Host agent CLI matching `sessionAgent` (`claude-code` → `claude`, `codex` → `codex`, `antigravity` / `agy` → `agy`), unless `DEV_MEM_DISABLE_CLI_LLM=1`
 4. Ambient API key env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`)
-5. Any other detected host agent CLI on `PATH` (`claude`, `codex`, `gemini`)
+5. Any other detected host agent CLI on `PATH` (`claude`, `codex`, `agy`)
 
 ---
 
@@ -984,7 +988,7 @@ Provider resolution follows a deterministic priority order (explicit overrides w
 
 **Location:** `core/mcp/server.ts`
 
-In v0.4.0, Dev-Mem introduces first-class support for the Model Context Protocol (MCP), providing standard tool interfaces over `stdio` so that any MCP-compliant client (Claude Desktop, Claude Code, Cursor, OpenCode, Codex) can search, record, verify, and resolve engineering memory directly.
+In v0.4.0, Dev-Mem introduces first-class support for the Model Context Protocol (MCP), providing standard tool interfaces over `stdio` so that any MCP-compliant client (Claude Desktop, Claude Code, Cursor, OpenCode, Codex, Antigravity) can search, record, verify, and resolve engineering memory directly.
 
 #### 6.9.1 Zero-Daemon Architecture
 
@@ -997,7 +1001,7 @@ Traditional MCP servers frequently operate as resident HTTP or WebSocket daemons
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│   MCP Client (Claude Desktop / Cursor / OpenCode)      │
+│   MCP Client (Claude Desktop / Cursor / OpenCode / Antigravity) │
 └──────────────────────────┬─────────────────────────────┘
                            │ stdio (JSON-RPC 2.0)
                            ▼
@@ -1145,14 +1149,14 @@ onSessionEnd(transcript) → Trigger batched extraction
 
 ### 7.2 Per-Agent Hook Mapping
 
-| Lifecycle Event | Claude Code | Codex | Cursor | OpenCode |
-|----------------|------------|-------|--------|----------|
-| **Session Start** | `SessionStart` | `SessionStart` | `sessionStart` | `chat.message` |
-| **Prompt Submission** | `UserPromptSubmit` | — | — | `chat.message` |
-| **Pre-Tool Use** | — | `PreToolUse` | `preToolUse` | — |
-| **Post-Tool Use** | `PostToolUse` | `PostToolUse` | `postToolUse` | `tool.execute.after` |
-| **Stop / Idle** | `Stop` | `Stop` | `stop` | `session.idle` |
-| **Session End** | `SessionEnd` | `SessionEnd` | *(unreliable)* | *(unreliable)* |
+| Lifecycle Event | Claude Code | Codex | Cursor | OpenCode | Antigravity |
+|----------------|------------|-------|--------|----------|-------------|
+| **Session Start** | `SessionStart` | `SessionStart` | `sessionStart` | `chat.message` | `SessionStart` |
+| **Prompt Submission** | `UserPromptSubmit` | — | — | `chat.message` | `PreInvocation` |
+| **Pre-Tool Use** | — | `PreToolUse` | `preToolUse` | — | `PreToolUse` |
+| **Post-Tool Use** | `PostToolUse` | `PostToolUse` | `postToolUse` | `tool.execute.after` | `PostToolUse` |
+| **Stop / Idle** | `Stop` | `Stop` | `stop` | `session.idle` | `Stop` |
+| **Session End** | `SessionEnd` | `SessionEnd` | *(unreliable)* | *(unreliable)* | `Stop` *(triggers detached extract)* |
 
 ### 7.3 Agent-Specific Notes
 
@@ -1179,6 +1183,12 @@ onSessionEnd(transcript) → Trigger batched extraction
 - Uses `session.idle` event as a proxy for session end
 - Turn-based extraction trigger
 
+**Antigravity (v1.1.0):**
+- Hooks installed under `.agents/hooks.json` (`dev-memo` group) and `.agents/hooks/dev-mem-*.js`; MCP registered in `.agents/mcp_config.json`
+- Normalizes camelCase payloads (`conversationId`, `workspacePaths`, `toolCall`, `toolOutput`, `exitCode`) and passes `--event <EventName>` from the generated hook wrappers
+- Prompt-time delta injection on `PreInvocation` with per-session deduplication
+- `PreToolUse` emits `{"decision":"allow"}` with optional `additionalContext` regression warnings and fails open on internal errors; `Stop` triggers detached extraction
+
 ### 7.4 Hook Installation Files
 
 When `dev-memo install` runs, it generates the following files:
@@ -1189,6 +1199,7 @@ When `dev-memo install` runs, it generates the following files:
 | Codex | `.codex/hooks.json` | `.codex/hooks/dev-mem-sessionstart.js`, `dev-mem-pretooluse.js`, `dev-mem-posttooluse.js`, `dev-mem-stop.js`, `dev-mem-sessionend.js` |
 | Cursor | `.cursor/hooks.json` | `.cursor/hooks/dev-mem-sessionstart.js`, `dev-mem-pretooluse.js`, `dev-mem-posttooluse.js`, `dev-mem-stop.js` |
 | OpenCode | `opencode.json` | `.opencode/plugins/dev-mem.ts` |
+| Antigravity | `.agents/hooks.json` | `.agents/hooks/dev-mem-session-start.js`, `dev-mem-pre-invocation.js`, `dev-mem-pre-tool-use.js`, `dev-mem-post-tool-use.js`, `dev-mem-stop.js` |
 
 ### 7.5 Hook Failure Handling
 
@@ -1456,7 +1467,7 @@ dev-memo inspect <node-id>
 
 ### 11.1 Zero-Friction Setup & CLI Detection (Addressed in v0.6.0)
 
-In v0.6.0, `dev-memo init [agent...]` infers `claude-code` or `codex` from installed host CLIs on `PATH` when no `.claude/`, `.codex/`, `.cursor/`, or `.opencode/` directories exist yet, creates missing agent directories automatically, registers `dev-memo mcp`, verifies the extraction backend, and seeds initial project memory via `dev-memo bootstrap`. Explicit agent lists (`dev-memo init codex cursor`) remain supported.
+In v0.6.0 (extended for Antigravity in v1.1.0), `dev-memo init [agent...]` infers `claude-code`, `codex`, or `antigravity` (`agy`) from installed host CLIs on `PATH` when no `.claude/`, `.codex/`, `.cursor/`, `.opencode/`, `.agents/`, or `GEMINI.md` exist yet, creates missing agent directories automatically, registers `dev-memo mcp`, verifies the extraction backend, and seeds initial project memory via `dev-memo bootstrap` (including `GEMINI.md` and `.agents/rules/*.md`). Explicit agent lists (`dev-memo init codex cursor antigravity`) remain supported.
 
 ### 11.2 Semantic Retrieval Scope (Upgraded in v0.8.0)
 
@@ -1519,7 +1530,7 @@ V3 should only begin if V1/V2 evaluation data shows file/commit-level grounding 
 | **Graph pruning strategies** | Time-based decay, access-frequency weighting, confidence thresholds |
 | **Multi-repo constraint propagation** | Monorepo-aware knowledge that propagates constraints across packages |
 | **Evaluation at scale** | Benchmark against 50+ node graphs and 100+ task sequences |
-| **Plugin ecosystem** | Third-party adapters for Windsurf, Aider, Continue.dev, Roo Code, Gemini CLI |
+| **Plugin ecosystem** | Third-party adapters for Windsurf, Aider, Continue.dev, Roo Code |
 
 ### 12.4 What Dev-Mem Will Never Be
 
@@ -1551,4 +1562,4 @@ V3 should only begin if V1/V2 evaluation data shows file/commit-level grounding 
 
 ---
 
-*End of technical report. Version 1.0.0, November 2026.*
+*End of technical report. Version 1.1.0, November 2026.*

@@ -27,6 +27,7 @@ const DEFAULT_INSTRUCTION_FILES = [
   "AGENTS.md",
   "CLAUDE.md",
   join(".claude", "CLAUDE.md"),
+  "GEMINI.md",
   ".cursorrules",
   join(".github", "copilot-instructions.md"),
 ];
@@ -150,13 +151,17 @@ function discoverInstructionFiles(projectRoot: string, extraFiles: string[]): Ar
     pushIfExists(join(projectRoot, rel));
   }
 
-  const cursorRulesDir = join(projectRoot, ".cursor", "rules");
-  if (existsSync(cursorRulesDir)) {
+  const ruleDirs: Array<{ dir: string; exts: string[] }> = [
+    { dir: join(projectRoot, ".cursor", "rules"), exts: [".md", ".mdc"] },
+    { dir: join(projectRoot, ".agents", "rules"), exts: [".md"] },
+  ];
+  for (const { dir, exts } of ruleDirs) {
+    if (!existsSync(dir)) continue;
     try {
-      const files = readdirSync(cursorRulesDir)
-        .filter((f) => f.endsWith(".md") || f.endsWith(".mdc"))
+      const files = readdirSync(dir)
+        .filter((f) => exts.some((ext) => f.endsWith(ext)))
         .sort();
-      for (const f of files) pushIfExists(join(cursorRulesDir, f));
+      for (const f of files) pushIfExists(join(dir, f));
     } catch {}
   }
 

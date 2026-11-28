@@ -113,4 +113,42 @@ describe("Cold-start project bootstrap (core/bootstrap)", () => {
     expect(nodes[0].content).toContain("[REDACTED_SECRET]");
     expect(nodes[0].content).not.toContain("sk-ant-");
   });
+
+  it("mines GEMINI.md and .agents/rules/*.md into Constraint/Convention nodes and stays idempotent", async () => {
+    writeFileSync(
+      join(dir, "GEMINI.md"),
+      [
+        "# Workspace Instructions",
+        "",
+        "## Constraints",
+        "- Never bypass GraphStore mutations with raw SQL writes.",
+        "- Always build dist before running integration tests.",
+      ].join("\n"),
+      "utf8",
+    );
+    mkdirSync(join(dir, ".agents", "rules"), { recursive: true });
+    writeFileSync(
+      join(dir, ".agents", "rules", "security.md"),
+      "- Never log raw API keys or bearer tokens to stdout.\n",
+      "utf8",
+    );
+
+    const first = await bootstrapProject({ projectRoot: dir });
+    expect(first.rulesAdded).toBe(3);
+    expect(first.sourcesScanned).toContain("GEMINI.md");
+    expect(first.sourcesScanned).toContain(".agents/rules/security.md");
+
+    const store = new GraphStore({ projectRoot: dir });
+    const constraints = store.queryByType("Constraint");
+    const conventions = store.queryByType("Convention");
+    store.close();
+
+    expect(constraints.some((c) => c.title.includes("Never bypass GraphStore"))).toBe(true);
+    expect(constraints.some((c) => c.title.includes("Never log raw API keys"))).toBe(true);
+    expect(conventions.some((c) => c.title.includes("Always build dist"))).toBe(true);
+
+    const second = await bootstrapProject({ projectRoot: dir });
+    expect(second.rulesAdded).toBe(0);
+    expect(second.skippedDuplicates).toBe(3);
+  });
 });

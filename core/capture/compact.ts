@@ -8,6 +8,7 @@ import { getDevMemDir, getEventsLogPath } from "../local-data.js";
 const PASS_STDOUT_LIMIT = 300;
 const MAX_DIFF_LINES = 500;
 const MAX_DIFF_BYTES = 20 * 1024; // 20KB
+const READ_TOOL_COMMANDS = new Set(["read", "view_file"]);
 
 function truncate(text: string | undefined, max: number): string | undefined {
   if (!text) return text;
@@ -67,8 +68,8 @@ export function compactSessionEventsForPrompt(events: CaptureEvent[]): CaptureEv
       // Drop pre-execution sentinel events (exit_code === -1)
       if (tc.exit_code === -1) continue;
 
-      // Deduplicate repeated Read calls on the same file
-      if (tc.command.toLowerCase() === "read" && tc.args && tc.args.length > 0) {
+      // Deduplicate repeated Read / view_file calls on the same file
+      if (READ_TOOL_COMMANDS.has(tc.command.toLowerCase()) && tc.args && tc.args.length > 0) {
         const readKey = tc.args[0];
         if (seenReads.has(readKey)) continue;
         seenReads.add(readKey);

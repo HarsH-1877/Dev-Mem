@@ -11,7 +11,9 @@ function inferAgentsWhenEmpty(cwd: string): string[] {
     existsSync(join(cwd, ".codex")) ||
     existsSync(join(cwd, ".cursor")) ||
     existsSync(join(cwd, ".opencode")) ||
-    existsSync(join(cwd, "opencode.json"));
+    existsSync(join(cwd, "opencode.json")) ||
+    existsSync(join(cwd, ".agents")) ||
+    existsSync(join(cwd, "GEMINI.md"));
 
   if (hasAnyDir) return [];
 
@@ -19,6 +21,7 @@ function inferAgentsWhenEmpty(cwd: string): string[] {
   const inferred: string[] = [];
   if (clis.includes("claude")) inferred.push("claude-code");
   if (clis.includes("codex")) inferred.push("codex");
+  if (clis.includes("agy")) inferred.push("antigravity");
   return inferred;
 }
 
@@ -55,7 +58,7 @@ export async function runInit(
     lines.push(`Extraction backend: ${provider.name}`);
   } else {
     lines.push(
-      "Extraction backend: none configured (authenticate claude/codex/gemini CLI, set an API key, or configure Ollama)",
+      "Extraction backend: none configured (authenticate claude/codex/agy CLI, set an API key, or configure Ollama)",
     );
   }
 

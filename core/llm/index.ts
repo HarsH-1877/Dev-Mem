@@ -27,11 +27,11 @@ export {
  * Resolves an LLM provider based on explicit overrides, host agent CLI, or API keys.
  *
  * Priority order (first match wins):
- * 1. Explicit `provider` / `DEV_MEM_LLM_PROVIDER` (anthropic, openai, gemini, openai-compatible, cli-claude, cli-codex, cli-gemini)
+ * 1. Explicit `provider` / `DEV_MEM_LLM_PROVIDER` (anthropic, openai, gemini, openai-compatible, cli-claude, cli-codex, cli-agy)
  * 2. `DEV_MEM_LLM_BASE_URL` env var or option (Ollama, Groq, OpenRouter, LM Studio)
  * 3. Installed host agent CLI matching `sessionAgent` (zero extra API keys, unless DEV_MEM_DISABLE_CLI_LLM=1)
  * 4. Ambient API key env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY / GOOGLE_API_KEY)
- * 5. Any other installed host agent CLI on PATH (claude, codex, gemini)
+ * 5. Any other installed host agent CLI on PATH (claude, codex, agy)
  *
  * Returns null if no usable provider is found.
  */
@@ -48,8 +48,8 @@ export function resolveProvider(options?: ProviderResolutionOptions): LlmProvide
   if (provider === "cli-codex" || provider === "codex") {
     return createCliAgentProvider("codex", { model });
   }
-  if (provider === "cli-gemini") {
-    return createCliAgentProvider("gemini", { model });
+  if (provider === "cli-agy" || provider === "agy" || provider === "cli-gemini") {
+    return createCliAgentProvider("agy", { model });
   }
   if (provider === "anthropic") {
     const key = apiKey || process.env.ANTHROPIC_API_KEY;
@@ -99,7 +99,7 @@ export function resolveProvider(options?: ProviderResolutionOptions): LlmProvide
     return createGeminiProvider(geminiKey, model);
   }
 
-  // 5. Fallback to any available host CLI when no API keys exist (e.g., Cursor/OpenCode users with claude/gemini CLI installed)
+  // 5. Fallback to any available host CLI when no API keys exist (e.g., Cursor/OpenCode users with claude/agy CLI installed)
   if (availableClis.length > 0) {
     return createCliAgentProvider(availableClis[0], { model });
   }

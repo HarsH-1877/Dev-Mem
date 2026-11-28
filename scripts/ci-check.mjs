@@ -133,7 +133,7 @@ if (!existsSync(cliPath)) {
     execFileSync("git", ["add", "."], { cwd: tempDir, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "init"], { cwd: tempDir, stdio: "ignore" });
 
-    for (const dir of [".claude", ".codex", ".cursor", ".opencode"]) {
+    for (const dir of [".claude", ".codex", ".cursor", ".opencode", ".agents"]) {
       mkdirSync(join(tempDir, dir), { recursive: true });
     }
 

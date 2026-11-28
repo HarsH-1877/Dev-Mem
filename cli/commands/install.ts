@@ -2,12 +2,32 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureLocalDataDir, getDevMemDir, isLinkedWorktree } from "../../core/local-data.js";
+import {
+  ANTIGRAVITY_INSTALLED_EVENTS,
+  ANTIGRAVITY_LIFECYCLE_EVENTS,
+  ANTIGRAVITY_TOOL_EVENTS,
+} from "../../adapters/antigravity/index.js";
 import { buildResolverSource, HOOK_MARKER } from "../hook-resolver.js";
 
-function adapterHook(adapter: "claude-code" | "codex" | "cursor"): string {
+function adapterHook(adapter: "claude-code" | "codex" | "cursor" | "antigravity", eventArg?: string): string {
+  const pushEvent = eventArg ? `  process.argv.push("--event", ${JSON.stringify(eventArg)});\n` : "";
+  if (adapter === "antigravity" && eventArg === "PreToolUse") {
+    return `${buildResolverSource()}
+let handled = false;
+if (distDir) {
+${pushEvent}  try {
+    await import(pathToFileURL(join(distDir, "adapters", "${adapter}", "hook.js")).href);
+    handled = true;
+  } catch {}
+}
+if (!handled) {
+  process.stdout.write('{"decision":"allow"}\\n');
+}
+`;
+  }
   return `${buildResolverSource()}
 if (distDir) {
-  try { await import(pathToFileURL(join(distDir, "adapters", "${adapter}", "hook.js")).href); } catch {}
+${pushEvent}  try { await import(pathToFileURL(join(distDir, "adapters", "${adapter}", "hook.js")).href); } catch {}
 }
 `;
 }
@@ -15,6 +35,11 @@ if (distDir) {
 function getHookScriptCode(_eventName: string): string { return adapterHook("claude-code"); }
 function getCodexHookScriptCode(_eventName: string): string { return adapterHook("codex"); }
 function getCursorHookScriptCode(_eventName: string): string { return adapterHook("cursor"); }
+function getAntigravityHookScriptCode(eventName: string): string { return adapterHook("antigravity", eventName); }
+
+function toKebabCase(name: string): string {
+  return name.replace(/([A-Z])/g, "-$1").toLowerCase().replace(/^-/, "");
+}
 
 function getOpenCodeHookScriptCode(): string {
   return `import { spawnSync } from "node:child_process";
@@ -245,11 +270,56 @@ function installOpenCodeHooks(cwd: string): void {
   writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
 }
 
+function installAntigravityHooks(cwd: string): void {
+  const agentsDir = join(cwd, ".agents");
+  const hooksDir = join(agentsDir, "hooks");
+  if (!existsSync(hooksDir)) mkdirSync(hooksDir, { recursive: true });
+
+  for (const event of ANTIGRAVITY_INSTALLED_EVENTS) {
+    const scriptName = `dev-mem-${toKebabCase(event)}.js`;
+    writeFileSync(join(hooksDir, scriptName), getAntigravityHookScriptCode(event), "utf8");
+  }
+
+  mergeJsonFile(join(agentsDir, "hooks.json"), (hooksJson) => {
+    const devMemoGroup: Record<string, any[]> = {};
+    for (const event of ANTIGRAVITY_LIFECYCLE_EVENTS) {
+      const scriptName = `dev-mem-${toKebabCase(event)}.js`;
+      devMemoGroup[event] = [
+        {
+          type: "command",
+          command: `node .agents/hooks/${scriptName}`,
+          timeout: 5,
+        },
+      ];
+    }
+    for (const event of ANTIGRAVITY_TOOL_EVENTS) {
+      const scriptName = `dev-mem-${toKebabCase(event)}.js`;
+      devMemoGroup[event] = [
+        {
+          matcher: "*",
+          hooks: [
+            {
+              type: "command",
+              command: `node .agents/hooks/${scriptName}`,
+              timeout: 5,
+            },
+          ],
+        },
+      ];
+    }
+    hooksJson["dev-memo"] = devMemoGroup;
+  });
+}
+
 export function installHooks(cwd: string, requestedAgents: string[]): { installedAgents: string[]; defaultedToClaude: boolean } {
   const installedAgents: string[] = [];
-  const validAgents = ["claude-code", "codex", "cursor", "opencode"];
+  const validAgents = ["claude-code", "codex", "cursor", "opencode", "antigravity"];
+  const agentAliases: Record<string, string> = { agy: "antigravity" };
 
-  const explicitAgents = requestedAgents.map((a) => a.toLowerCase());
+  const explicitAgents = requestedAgents.map((a) => {
+    const lower = a.toLowerCase();
+    return agentAliases[lower] ?? lower;
+  });
   for (const agent of explicitAgents) {
     if (!validAgents.includes(agent)) {
       throw new Error(`Invalid agent: ${agent}. Supported agents: ${validAgents.join(", ")}`);
@@ -263,8 +333,12 @@ export function installHooks(cwd: string, requestedAgents: string[]): { installe
   const opencodePresent = explicit
     ? explicitAgents.includes("opencode")
     : existsSync(join(cwd, ".opencode")) || existsSync(join(cwd, "opencode.json"));
+  const antigravityPresent = explicit
+    ? explicitAgents.includes("antigravity")
+    : existsSync(join(cwd, ".agents")) || existsSync(join(cwd, "GEMINI.md"));
 
-  const defaultedToClaude = !explicit && !claudePresent && !codexPresent && !cursorPresent && !opencodePresent;
+  const defaultedToClaude =
+    !explicit && !claudePresent && !codexPresent && !cursorPresent && !opencodePresent && !antigravityPresent;
   if (claudePresent || defaultedToClaude) {
     installClaudeCodeHooks(cwd);
     installedAgents.push("claude-code");
@@ -280,6 +354,10 @@ export function installHooks(cwd: string, requestedAgents: string[]): { installe
   if (opencodePresent) {
     installOpenCodeHooks(cwd);
     installedAgents.push("opencode");
+  }
+  if (antigravityPresent) {
+    installAntigravityHooks(cwd);
+    installedAgents.push("antigravity");
   }
 
   ensureLocalDataDir(cwd);
@@ -375,6 +453,30 @@ function uninstallCursorHooks(cwd: string): void {
   }
 }
 
+function uninstallAntigravityHooks(cwd: string): void {
+  const agentsDir = join(cwd, ".agents");
+  const hooksJsonPath = join(agentsDir, "hooks.json");
+
+  if (existsSync(hooksJsonPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        delete parsed["dev-memo"];
+        writeFileSync(hooksJsonPath, JSON.stringify(parsed, null, 2) + "\n", "utf8");
+      }
+    } catch {}
+  }
+
+  const hooksDir = join(agentsDir, "hooks");
+  if (existsSync(hooksDir)) {
+    for (const event of ANTIGRAVITY_INSTALLED_EVENTS) {
+      const scriptName = `dev-mem-${toKebabCase(event)}.js`;
+      const scriptPath = join(hooksDir, scriptName);
+      if (existsSync(scriptPath)) rmSync(scriptPath);
+    }
+  }
+}
+
 export function uninstallHooks(cwd: string, purge: boolean): void {
   const claudeDir = join(cwd, ".claude");
   const settingsPath = join(claudeDir, "settings.json");
@@ -407,6 +509,7 @@ export function uninstallHooks(cwd: string, purge: boolean): void {
   if (existsSync(join(cwd, ".codex"))) uninstallCodexHooks(cwd);
   if (existsSync(join(cwd, ".cursor"))) uninstallCursorHooks(cwd);
   if (existsSync(join(cwd, ".opencode")) || existsSync(join(cwd, "opencode.json"))) uninstallOpenCodeHooks(cwd);
+  if (existsSync(join(cwd, ".agents"))) uninstallAntigravityHooks(cwd);
 
   if (purge && !isLinkedWorktree(cwd)) {
     const devMemDir = getDevMemDir(cwd);
@@ -420,6 +523,7 @@ export function findStaleHooks(cwd: string): string[] {
     [".codex/hooks", /^dev-mem-.*\.js$/],
     [".cursor/hooks", /^dev-mem-.*\.js$/],
     [".opencode/plugins", /^dev-mem.*\.[jt]s$/],
+    [".agents/hooks", /^dev-mem-.*\.js$/],
   ];
   const stale: string[] = [];
   for (const [rel, pattern] of locations) {
@@ -461,6 +565,15 @@ function mergeJsonFile(filePath: string, updater: (current: Record<string, any>)
   writeFileSync(filePath, JSON.stringify(obj, null, 2) + "\n", "utf8");
 }
 
+function registerStandardMcpServer(target: string): void {
+  mergeJsonFile(target, (obj) => {
+    if (!obj.mcpServers || typeof obj.mcpServers !== "object") obj.mcpServers = {};
+    if (!obj.mcpServers["dev-memo"]) {
+      obj.mcpServers["dev-memo"] = MCP_ENTRY;
+    }
+  });
+}
+
 /**
  * Idempotently registers `dev-memo mcp` in project MCP configuration files for
  * the installed agents. Returns relative config file paths written/verified.
@@ -469,25 +582,18 @@ export function registerMcpConfigs(cwd: string, agents: string[]): string[] {
   const registered: string[] = [];
 
   if (agents.includes("claude-code")) {
-    const target = join(cwd, ".mcp.json");
-    mergeJsonFile(target, (obj) => {
-      if (!obj.mcpServers || typeof obj.mcpServers !== "object") obj.mcpServers = {};
-      if (!obj.mcpServers["dev-memo"]) {
-        obj.mcpServers["dev-memo"] = MCP_ENTRY;
-      }
-    });
+    registerStandardMcpServer(join(cwd, ".mcp.json"));
     registered.push(".mcp.json");
   }
 
   if (agents.includes("cursor")) {
-    const target = join(cwd, ".cursor", "mcp.json");
-    mergeJsonFile(target, (obj) => {
-      if (!obj.mcpServers || typeof obj.mcpServers !== "object") obj.mcpServers = {};
-      if (!obj.mcpServers["dev-memo"]) {
-        obj.mcpServers["dev-memo"] = MCP_ENTRY;
-      }
-    });
+    registerStandardMcpServer(join(cwd, ".cursor", "mcp.json"));
     registered.push(".cursor/mcp.json");
+  }
+
+  if (agents.includes("antigravity")) {
+    registerStandardMcpServer(join(cwd, ".agents", "mcp_config.json"));
+    registered.push(".agents/mcp_config.json");
   }
 
   if (agents.includes("opencode")) {

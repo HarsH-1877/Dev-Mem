@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -698,4 +698,67 @@ describe("dev-memo review TUI (v0.7)", () => {
     store.close();
   });
 });
+
+describe("dev-memo export --md & sync MEMORY.md integration (v0.7)", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "dm-cli-export-"));
+    initGitRepo(dir);
+    const store = new GraphStore({ projectRoot: dir });
+    try {
+      store.createNode({
+        type: "Decision",
+        title: "Keep WAL enabled",
+        content: "Concurrent hook writes need WAL mode",
+        lifecycle_state: "verified",
+        evidence: { ...BASE_EVIDENCE, files: ["core/graph/index.ts"] },
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("exports MEMORY.md and AGENTS.md block via dev-memo export --md --agents-md", async () => {
+    const res = await runCli(["export", "--md", "--agents-md"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("MEMORY.md");
+    expect(existsSync(join(dir, ".dev-mem", "MEMORY.md"))).toBe(true);
+    expect(existsSync(join(dir, "AGENTS.md"))).toBe(true);
+    expect(readFileSync(join(dir, ".dev-mem", "MEMORY.md"), "utf8")).toContain("Keep WAL enabled");
+    expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).toContain("<!-- dev-mem:start -->");
+  });
+
+  it("updates .dev-mem/MEMORY.md and .gitignore during sync", async () => {
+    const res = await runCli(["sync"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(existsSync(join(dir, ".dev-mem", "MEMORY.md"))).toBe(true);
+    expect(readFileSync(join(dir, ".gitignore"), "utf8")).toContain("!.dev-mem/MEMORY.md");
+  });
+
+  it("discovers Claude Code project memory files for bootstrap --claude-memory", async () => {
+    const { findClaudeMemoryFiles } = await import("./commands/bootstrap.js");
+    const fakeHome = mkdtempSync(join(tmpdir(), "dm-claude-home-"));
+    try {
+      const encoded = dir.replace(/[:\\/]/g, "-");
+      const memDir = join(fakeHome, ".claude", "projects", encoded, "memory");
+      mkdirSync(memDir, { recursive: true });
+      writeFileSync(
+        join(memDir, "MEMORY.md"),
+        "# Project Notes\n\n- **Constraint:** Never push directly to production without smoke tests\n",
+        "utf8",
+      );
+      const found = findClaudeMemoryFiles(dir, fakeHome);
+      expect(found.length).toBe(1);
+      expect(found[0]).toContain("MEMORY.md");
+    } finally {
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+});
+
 

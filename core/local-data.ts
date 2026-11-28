@@ -6,8 +6,9 @@ export const DEV_MEM_DIR = ".dev-mem";
 export const GRAPH_DB_FILENAME = "graph.sqlite";
 export const EVENTS_LOG_FILENAME = "events.jsonl";
 export const SHARED_GRAPH_FILENAME = "shared.jsonl";
+export const MEMORY_MD_FILENAME = "MEMORY.md";
 export const EXTRACTION_LOG_FILENAME = "extraction.log";
-export const GITIGNORE_ENTRY = ".dev-mem/*\n!.dev-mem/shared.jsonl";
+export const GITIGNORE_ENTRY = ".dev-mem/*\n!.dev-mem/shared.jsonl\n!.dev-mem/MEMORY.md";
 
 export function getDevMemDir(projectRoot: string): string {
   return join(projectRoot, DEV_MEM_DIR);
@@ -23,6 +24,10 @@ export function getEventsLogPath(projectRoot: string): string {
 
 export function getSharedGraphPath(projectRoot: string): string {
   return join(getDevMemDir(projectRoot), SHARED_GRAPH_FILENAME);
+}
+
+export function getMemoryMarkdownPath(projectRoot: string): string {
+  return join(getDevMemDir(projectRoot), MEMORY_MD_FILENAME);
 }
 
 export function getExtractionLogPath(projectRoot: string): string {
@@ -89,14 +94,21 @@ export function ensureDevMemGitignore(projectRoot: string): void {
   const current = readFileSync(gitignorePath, "utf8");
   const lines = current.split(/\r?\n/);
 
-  // If already allowing shared.jsonl with wildcard ignore, we are done
+  // If already allowing shared.jsonl & MEMORY.md with wildcard ignore, we are done
   const hasWildcard = lines.some((line) => line.trim() === ".dev-mem/*");
-  const hasUnignore = lines.some((line) => line.trim() === "!.dev-mem/shared.jsonl");
-  if (hasWildcard && hasUnignore) {
+  const hasUnignoreShared = lines.some((line) => line.trim() === "!.dev-mem/shared.jsonl");
+  const hasUnignoreMemory = lines.some((line) => line.trim() === "!.dev-mem/MEMORY.md");
+  if (hasWildcard && hasUnignoreShared && hasUnignoreMemory) {
     return;
   }
 
-  // If old-style .dev-mem/ or .dev-mem exists, replace it so shared.jsonl can be committed
+  if (hasWildcard && hasUnignoreShared && !hasUnignoreMemory) {
+    const suffix = current.endsWith("\n") || current.length === 0 ? "" : "\n";
+    writeFileSync(gitignorePath, `${current}${suffix}!.dev-mem/MEMORY.md\n`, "utf8");
+    return;
+  }
+
+  // If old-style .dev-mem/ or .dev-mem exists, replace it so shared.jsonl & MEMORY.md can be committed
   const hasOldStyle = lines.some(
     (line) => line.trim() === ".dev-mem/" || line.trim() === ".dev-mem",
   );
@@ -105,7 +117,7 @@ export function ensureDevMemGitignore(projectRoot: string): void {
     const newLines = lines.flatMap((line) => {
       const trimmed = line.trim();
       if (trimmed === ".dev-mem/" || trimmed === ".dev-mem") {
-        return [".dev-mem/*", "!.dev-mem/shared.jsonl"];
+        return [".dev-mem/*", "!.dev-mem/shared.jsonl", "!.dev-mem/MEMORY.md"];
       }
       return [line];
     });

@@ -10,6 +10,7 @@ import { installHooks, uninstallHooks, findStaleHooks } from "./commands/install
 import { runStatus, runDoctor } from "./commands/diagnostics.js";
 import { runQuery, runInspect } from "./commands/inspect.js";
 import { extractOnce, runWrap } from "./commands/extract.js";
+import { runBootstrap } from "./commands/bootstrap.js";
 
 const COMMANDS = [
   "install",
@@ -23,6 +24,7 @@ const COMMANDS = [
   "prune",
   "sync",
   "mcp",
+  "bootstrap",
 ] as const;
 
 type Command = (typeof COMMANDS)[number];
@@ -63,6 +65,7 @@ function helpText(): string {
     "",
     "Commands:",
     "  install [agent...]   Install hooks (claude-code, codex, cursor, opencode); auto-detects if omitted",
+    "  bootstrap [--from f] Mine git reverts & instruction files into starter memory ($0 LLM cost)",
     "  status               Show graph and capture status",
     "  doctor [--live]      Check git, hooks, install path and LLM configuration",
     "  query \"<task>\"       Show context relevant to a task",
@@ -165,6 +168,14 @@ export async function runCli(
       const { startMcpStdioServer } = await import("../core/mcp/server.js");
       await startMcpStdioServer(cwd);
       return { exitCode: 0, stdout: "", stderr: "" };
+    } else if (command === "bootstrap") {
+      const res = await runBootstrap(cwd, args);
+      const total = res.revertsAdded + res.rulesAdded;
+      return {
+        exitCode: 0,
+        stdout: `Bootstrapped ${total} memory node(s) (reverts: ${res.revertsAdded}, rules: ${res.rulesAdded}, skipped duplicates: ${res.skippedDuplicates}).\n`,
+        stderr: "",
+      };
     }
   } catch (e: any) {
     return { exitCode: 1, stdout: "", stderr: e.message + "\n" };

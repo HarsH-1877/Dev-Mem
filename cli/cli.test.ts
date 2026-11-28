@@ -473,4 +473,22 @@ describe("Extraction visibility log (v0.5)", () => {
     expect(status.stdout).toContain("Last extraction:");
     expect(status.stdout).toContain("FAILED");
   });
+});
+
+describe("dev-memo bootstrap (v0.6)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "dm-cli-boot-"));
+    initGitRepo(dir);
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("bootstraps rules from AGENTS.md via runCli", async () => {
+    writeFileSync(join(dir, "AGENTS.md"), "- Never mutate graph rows directly outside GraphStore.\n", "utf8");
+    const res = await runCli(["bootstrap"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("Bootstrapped 1 memory node(s)");
+  });
 });

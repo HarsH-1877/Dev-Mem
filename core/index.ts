@@ -49,3 +49,8 @@ export {
   type SharedEdgeRecord,
   type SharedRecord,
 } from "./sync/index.js";
+export {
+  bootstrapProject,
+  type BootstrapOptions,
+  type BootstrapResult,
+} from "./bootstrap/index.js";

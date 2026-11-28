@@ -17,7 +17,8 @@
     "./regression": "./dist/core/regression/index.js",
     "./consistency": "./dist/core/consistency/index.js",
     "./mcp": "./dist/core/mcp/server.js",
-    "./sync": "./dist/core/sync/index.js"
+    "./sync": "./dist/core/sync/index.js",
+    "./bootstrap": "./dist/core/bootstrap/index.js"
   },
   "files": [
     "dist/cli",

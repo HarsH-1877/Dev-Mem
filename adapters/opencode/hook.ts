@@ -69,7 +69,7 @@ async function main() {
 
         const { retrieveContext, generateInjectionString } = await import("../../core/retrieval/index.js");
         const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
-        const { filterUnseenNodes, hasSessionInjections } = await import("../../core/retrieval/session-dedup.js");
+        const { filterUnseenNodes, filterUnseenWarnings, hasSessionInjections } = await import("../../core/retrieval/session-dedup.js");
 
         const currentFiles = Array.isArray(gitSnap.status)
           ? gitSnap.status.map((s) => s.path)
@@ -82,14 +82,18 @@ async function main() {
               ? JSON.stringify(payload.message)
               : undefined;
 
-        const regressionMatches = checkRegressionRisk({
-          projectRoot,
-          currentFiles,
-          confidenceThreshold: 0.6,
-        });
-        const regressionWarning = formatRegressionWarning(regressionMatches);
-
         const trimmedTask = currentTask?.trim() || undefined;
+        const regressionMatches = filterUnseenWarnings(
+          projectRoot,
+          payload.session_id,
+          checkRegressionRisk({
+            projectRoot,
+            currentFiles,
+            currentTask: trimmedTask,
+            confidenceThreshold: 0.6,
+          }),
+        );
+        const regressionWarning = formatRegressionWarning(regressionMatches);
         const isFollowUp = hasSessionInjections(projectRoot, payload.session_id);
         const nodes = retrieveContext({
           projectRoot,
@@ -143,11 +147,18 @@ async function main() {
 
         if (touchedFile && (toolName === "write" || toolName === "edit")) {
           const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
-          const matches = checkRegressionRisk({
+          const { filterUnseenWarnings } = await import("../../core/retrieval/session-dedup.js");
+          const editSnippet = stringFor(payload.args?.content, stringFor(payload.args?.newString, "")).slice(0, 500);
+          const matches = filterUnseenWarnings(
             projectRoot,
-            currentFiles: [touchedFile],
-            confidenceThreshold: 0.6,
-          });
+            payload.session_id,
+            checkRegressionRisk({
+              projectRoot,
+              currentFiles: [touchedFile],
+              currentTask: editSnippet || undefined,
+              confidenceThreshold: 0.6,
+            }),
+          );
           const warning = formatRegressionWarning(matches);
           if (warning) {
             console.log(JSON.stringify({

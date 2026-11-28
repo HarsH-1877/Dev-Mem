@@ -1,10 +1,47 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-function seenFilePath(projectRoot: string, sessionId: string): string {
+function sessionStatePath(projectRoot: string, sessionId: string, suffix: string): string {
   const dir = join(projectRoot, ".dev-mem", "sessions");
   mkdirSync(dir, { recursive: true });
-  return join(dir, `${encodeURIComponent(sessionId)}.injected.json`);
+  return join(dir, `${encodeURIComponent(sessionId)}.${suffix}.json`);
+}
+
+function filterUnseenById<T>(
+  projectRoot: string,
+  sessionId: string,
+  suffix: string,
+  items: T[],
+  getId: (item: T) => string,
+): T[] {
+  if (!sessionId || items.length === 0) return items;
+  try {
+    const path = sessionStatePath(projectRoot, sessionId, suffix);
+    let seenIds: string[] = [];
+    if (existsSync(path)) {
+      try {
+        const parsed = JSON.parse(readFileSync(path, "utf8"));
+        if (Array.isArray(parsed)) seenIds = parsed;
+      } catch {
+        seenIds = [];
+      }
+    }
+    const seenSet = new Set(seenIds);
+    const unseen: T[] = [];
+    for (const item of items) {
+      const id = getId(item);
+      if (!seenSet.has(id)) {
+        seenSet.add(id);
+        unseen.push(item);
+      }
+    }
+    if (unseen.length > 0) {
+      writeFileSync(path, JSON.stringify([...seenSet]), "utf8");
+    }
+    return unseen;
+  } catch {
+    return items;
+  }
 }
 
 /**
@@ -28,31 +65,17 @@ export function filterUnseenNodes<T extends { id: string }>(
   sessionId: string,
   nodes: T[],
 ): T[] {
-  if (!sessionId || nodes.length === 0) return nodes;
-  try {
-    const path = seenFilePath(projectRoot, sessionId);
-    let seenIds: string[] = [];
-    if (existsSync(path)) {
-      try {
-        const parsed = JSON.parse(readFileSync(path, "utf8"));
-        if (Array.isArray(parsed)) seenIds = parsed;
-      } catch {
-        seenIds = [];
-      }
-    }
-    const seenSet = new Set(seenIds);
-    const unseen: T[] = [];
-    for (const node of nodes) {
-      if (!seenSet.has(node.id)) {
-        seenSet.add(node.id);
-        unseen.push(node);
-      }
-    }
-    if (unseen.length > 0) {
-      writeFileSync(path, JSON.stringify([...seenSet]), "utf8");
-    }
-    return unseen;
-  } catch {
-    return nodes;
-  }
+  return filterUnseenById(projectRoot, sessionId, "injected", nodes, (n) => n.id);
+}
+
+/**
+ * Filters regression warning matches down to FailedApproach node IDs not yet
+ * surfaced during `sessionId`, stopping repeated edit-hook warning spam.
+ */
+export function filterUnseenWarnings<T extends { node: { id: string } }>(
+  projectRoot: string,
+  sessionId: string,
+  matches: T[],
+): T[] {
+  return filterUnseenById(projectRoot, sessionId, "warnings", matches, (m) => m.node.id);
 }

@@ -402,5 +402,5 @@ ${formatted}
 
 // ─── Exported internals for testing ──────────────────────────────────────────
 
-export { filterUnseenNodes } from "./session-dedup.js";
+export { filterUnseenNodes, filterUnseenWarnings } from "./session-dedup.js";
 export { calculateRelevance, calculateFreshness, calculateGraphProximity, jaccard, tokenise, adaptiveBudget };

@@ -1,6 +1,6 @@
 # Dev-Mem — Technical Report
 
-**Version:** 0.7.0 (Human Curation, Review TUI & Markdown Projection)  
+**Version:** 0.8.0 (FTS5/BM25 Retrieval, Regression Dedup & Multi-Repo Benchmark)  
 **Date:** November 2026  
 **Author:** Harsh Asalkar  
 **Repository:** [github.com/HarsH-1877/Dev-Mem](https://github.com/HarsH-1877/Dev-Mem)  
@@ -666,13 +666,13 @@ score(node) = 0.35 × relevance
 
 #### 6.4.2 Scoring Component Details
 
-**Relevance** uses Jaccard similarity between tokenized text sets:
+**Relevance** (upgraded in v0.8.0) combines SQLite FTS5 BM25 field-weighted search (`title: 3.0`, `symbols: 2.5`, `files: 2.0`, `content: 1.5`, Porter stemming + camelCase token expansion) with morphological Jaccard similarity and direct symbol matching:
 
-- If `currentTask` is provided: `Jaccard(taskTokens, nodeTokens)` — where `nodeTokens = tokenise(title + content + files)`
-- If only `currentFiles` is provided: Jaccard on file-path token overlap
+- If `currentTask` is provided: computes `jaccardRel = Jaccard(taskTokens, nodeTokens)` across `title + content + files + symbols` (with `+0.25` boost for explicit `evidence.symbols` matches), and blends normalized FTS5 BM25 scores when calibrated overlap passes `>= 0.07`.
+- If only `currentFiles` is provided: Jaccard on file-path token overlap (`graph_proximity` awards full exact-file credit plus `0.4×` parent-directory overlap credit).
 - If neither: returns 0.5 (neutral)
 
-Tokenization splits on non-word characters, lowercases, drops stopwords, and filters tokens shorter than 3 characters.
+Tokenization splits on non-word characters, lowercases, drops stopwords, and filters tokens shorter than 3 characters (FTS5 indexes camelCase boundary tokens >= 2 characters).
 
 **Freshness** uses type-aware exponential decay (added in v0.5.0) so durable architectural constraints do not age out alongside transient session findings:
 
@@ -1342,6 +1342,16 @@ Dev-Mem's evaluation uses a fixed sample repository with a sequence of 12 interd
 | 12 | **codex** | Refactor for Consistency | 602 | 451 | 151 |
 
 > **Note:** Tasks 9–11 show negative per-task savings because the injection overhead exceeds rediscovery cost for those specific tasks. However, the **cumulative** net token delta remains positive (+562) because earlier tasks with high rediscovery cost dominate the total.
+
+### 9.7 Multi-Repo BM25 & Regression Noise Benchmark (v0.8.0)
+
+`eval/multi-repo-eval.ts` (`npm run eval:bm25`) evaluates 24 non-mock query and regression sessions across 3 corpora (`dev-mem-cli`, `ts-saas-api`, `fullstack-monorepo`):
+
+- **Hybrid Hit@1:** `95.2%` (vs. `90.5%` Jaccard-only baseline)
+- **Hybrid Recall@3:** `95.2%`
+- **Mean Reciprocal Rank (MRR):** `0.952` (vs. `0.905` baseline)
+- **Negative Query Leakage Rate:** `0.0%` (`0/3` unrelated queries leaked past `minRelevance: 0.08`)
+- **Hub-File False-Positive Suppression:** `100.0%` (`3/3` unrelated partial overlaps filtered + `3/3` repeat warnings deduplicated via `.dev-mem/sessions/<session-id>.warnings.json`)
 
 ---
 

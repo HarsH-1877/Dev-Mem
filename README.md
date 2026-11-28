@@ -471,7 +471,7 @@ Once hooks are installed, every agent session does this without any manual steps
 
 **At prompt submission (Claude Code `UserPromptSubmit`, OpenCode `chat.message`)** — As the task evolves across turns, Dev-Mem filters strictly on topical relevance (`minRelevance >= 0.08`) against the submitted prompt text and applies type-aware freshness decay (`Constraint`/`Convention` persist long-term while ephemeral `Discovery`/`OpenIssue` decay faster). Built-in per-session deduplication (`.dev-mem/sessions/<session-id>.injected.json`) ensures only new, un-injected relevant nodes are injected once per session.
 
-**During the session** — Every tool call (file writes, shell commands) is recorded to `.dev-mem/events.jsonl`. All events are scrubbed before storage: API keys (Anthropic, OpenAI, Gemini, GitHub, AWS, Slack, Bearer tokens, `.env` credentials) and `<private>...</private>` tags are automatically redacted. For Claude Code and Codex, this includes both pre- and post-execution snapshots. For Cursor, post-execution only. Mid-session regression checks also run on file writes.
+**During the session** — Every tool call (file writes, shell commands) is recorded to `.dev-mem/events.jsonl`. All events are scrubbed before storage: API keys (Anthropic, OpenAI, Gemini, GitHub, AWS, Slack, Bearer tokens, `.env` credentials) and `<private>...</private>` tags are automatically redacted. For Claude Code and Codex, this includes both pre- and post-execution snapshots. For Cursor, post-execution only. Mid-session regression checks also run on file writes, gated by topical similarity on partial file overlaps and deduplicated per session (`.dev-mem/sessions/<session-id>.warnings.json`) so hub files never trigger repeated warning spam.
 
 **At session end (Claude Code, Codex)** — Dev-Mem runs a deterministic compaction pass (stripping duplicate reads, collapsing consecutive status checks, and capping passing tool output) to reduce token overhead by 70–90%, followed by a single batched call (using your already-authenticated host CLI or configured API key) that extracts typed knowledge nodes and verifies surviving nodes only when corroborated by passing tests or commit advancement. Every run records its status and any errors to `.dev-mem/extraction.log` so diagnostics are always visible in `dev-memo status`.
 
@@ -511,7 +511,7 @@ Each item includes confidence and recency so the agent can weight trust appropri
 
 ## How it works (brief)
 
-Dev-Mem records deterministic events (git state, file touches, tool call logs) with zero LLM cost per event. At session end, one batched LLM call turns that event log into typed knowledge nodes with evidence pointers. At the next session start, a budget-constrained scoring pass selects the most relevant nodes from the graph (by topic similarity, freshness, confidence, and file proximity) and injects them as structured context.
+Dev-Mem records deterministic events (git state, file touches, tool call logs) with zero LLM cost per event. At session end, one batched call turns that event log into typed knowledge nodes with evidence pointers. At the next session start and on prompts, a hybrid SQLite FTS5/BM25 + stemmed Jaccard scoring pass with symbol/directory weighting selects the most relevant nodes within the token budget and injects them as structured context.
 
 The one-LLM-call-per-session design is deliberate: extraction is the only place an LLM is called. Capture, retrieval, and regression checks are all deterministic code with no API calls.
 

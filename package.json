@@ -1,6 +1,6 @@
 {
   "name": "dev-memo",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Shared, verified development state for AI coding agents — preserves decisions, failed approaches, and discoveries across sessions and agent switches",
   "license": "MIT",
   "type": "module",
@@ -54,6 +54,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval": "npm run build && node dist/eval/run-eval.js",
+    "eval:bm25": "npm run build && node dist/eval/multi-repo-eval.js",
     "eval:cross-agent": "npm run build && node dist/eval/harness/cross-agent.js"
   },
   "devDependencies": {

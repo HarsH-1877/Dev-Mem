@@ -9,13 +9,18 @@
 
 import { GraphStore } from "../graph/index.js";
 import type { KnowledgeNode } from "../graph/types.js";
+import { calculateRelevance } from "../retrieval/index.js";
 
 export interface RegressionCheckContext {
   projectRoot: string;
   /** Files the agent is about to touch / is currently working in. */
   currentFiles: string[];
+  /** Optional task or edit snippet used to gate partial file overlaps. */
+  currentTask?: string;
   /** 0–1 threshold; matches below this are silently skipped. Default 0.6. */
   confidenceThreshold?: number;
+  /** Minimum topical overlap when currentTask is set and overlapRatio < 1.0 (default 0.04). */
+  minTopicOverlap?: number;
   /** Override DB path (for testing). */
   dbPath?: string;
 }
@@ -24,6 +29,8 @@ export interface RegressionMatch {
   node: KnowledgeNode;
   /** Overlap ratio: matched_files / node.evidence.files.length */
   overlapRatio: number;
+  /** Optional topical similarity when currentTask was supplied. */
+  topicRelevance?: number;
 }
 
 /**
@@ -33,7 +40,14 @@ export interface RegressionMatch {
  * Does not throw — errors log and return [].
  */
 export function checkRegressionRisk(ctx: RegressionCheckContext): RegressionMatch[] {
-  const { projectRoot, currentFiles, confidenceThreshold = 0.6, dbPath } = ctx;
+  const {
+    projectRoot,
+    currentFiles,
+    currentTask,
+    confidenceThreshold = 0.6,
+    minTopicOverlap = 0.04,
+    dbPath,
+  } = ctx;
 
   if (currentFiles.length === 0) return [];
 
@@ -65,14 +79,23 @@ export function checkRegressionRisk(ctx: RegressionCheckContext): RegressionMatc
     const overlapRatio = nodeFiles.length > 0 ? matchedFiles.length / nodeFiles.length : 0;
 
     if (matchedFiles.length > 0) {
-      matches.push({ node, overlapRatio });
+      let topicRelevance: number | undefined;
+      if (currentTask && currentTask.trim().length > 0) {
+        topicRelevance = calculateRelevance(node, currentTask, currentFiles);
+        if (overlapRatio < 1.0 && topicRelevance < minTopicOverlap) {
+          continue;
+        }
+      }
+      matches.push({ node, overlapRatio, ...(topicRelevance !== undefined ? { topicRelevance } : {}) });
     }
   }
 
-  // Sort: higher overlap first, then higher confidence
+  // Sort: higher overlap + topical relevance first, then higher confidence
   matches.sort((a, b) => {
-    const overlapDiff = b.overlapRatio - a.overlapRatio;
-    if (Math.abs(overlapDiff) > 0.01) return overlapDiff;
+    const scoreA = a.overlapRatio + (a.topicRelevance ?? 0) * 0.5;
+    const scoreB = b.overlapRatio + (b.topicRelevance ?? 0) * 0.5;
+    const scoreDiff = scoreB - scoreA;
+    if (Math.abs(scoreDiff) > 0.01) return scoreDiff;
     return b.node.evidence.confidence - a.node.evidence.confidence;
   });
 

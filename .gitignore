@@ -12,3 +12,4 @@ test-*/
 test-sandbox/
 *.tgz
 
+!.dev-mem/MEMORY.md

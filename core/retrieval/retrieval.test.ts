@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import {
   calculateRelevance,
+  calculateGraphProximity,
   jaccard,
   tokenise,
   stemToken,
@@ -570,4 +571,90 @@ describe("Relevance gating, type-aware decay, and grounded multiplier (v0.5)", (
     expect(cRes.score).toBeGreaterThan(dRes.score + 0.1);
   });
 });
+
+describe("FTS5/BM25 hybrid retrieval & symbol/directory weighting (v0.8)", () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), "dev-mem-v08-bm25-"));
+    initGitRepo(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it("ranks FTS5 symbol match #1 across a noisy corpus and boosts same-directory files", () => {
+    const store = new GraphStore({ projectRoot: testDir });
+    const now = new Date().toISOString();
+
+    for (let i = 0; i < 8; i++) {
+      store.createNode({
+        type: "Discovery",
+        title: `Unrelated billing worker discovery ${i}`,
+        content: `General note on invoice queue number ${i}`,
+        lifecycle_state: "active",
+        evidence: {
+          commit: "1111111111111111111111111111111111111111",
+          files: [`src/billing/worker-${i}.ts`],
+          session_id: "s-noise",
+          agent: "claude-code",
+          timestamp: now,
+          confidence: 0.95,
+        },
+      });
+    }
+
+    const dirSibling = store.createNode({
+      type: "Convention",
+      title: "Rate limiter headers must stay numeric",
+      content: "Keep rate limiter response headers consistent",
+      lifecycle_state: "active",
+      evidence: {
+        commit: "2222222222222222222222222222222222222222",
+        files: ["src/auth/middleware.ts"],
+        session_id: "s-auth",
+        agent: "claude-code",
+        timestamp: now,
+        confidence: 0.85,
+      },
+    });
+
+    const exactSymbol = store.createNode({
+      type: "Constraint",
+      title: "Must invalidate refresh token chain on reuse detection",
+      content: "Revoke the full token family when replay is observed.",
+      lifecycle_state: "verified",
+      evidence: {
+        commit: "3333333333333333333333333333333333333333",
+        files: ["src/auth/tokens.ts"],
+        symbols: ["revokeTokenFamily"],
+        session_id: "s-auth",
+        agent: "claude-code",
+        timestamp: now,
+        confidence: 0.85,
+      },
+    });
+    store.close();
+
+    const hits = retrieveContext({
+      projectRoot: testDir,
+      currentTask: "fix revokeTokenFamily replay handling",
+      currentFiles: ["src/auth/login.ts"],
+      minRelevance: 0.08,
+      budgetTokens: 2000,
+    });
+
+    expect(hits.length).toBeGreaterThanOrEqual(1);
+    expect(hits[0].id).toBe(exactSymbol.id);
+    // Unrelated billing nodes must be filtered by minRelevance
+    expect(hits.some((h) => h.title.includes("billing"))).toBe(false);
+
+    // Same-directory proximity beats unrelated directory when no task query is present
+    const proxAuth = calculateGraphProximity(dirSibling, ["src/auth/login.ts"]);
+    const proxBilling = calculateGraphProximity(dirSibling, ["src/billing/worker-0.ts"]);
+    expect(proxAuth).toBeGreaterThan(proxBilling);
+  });
+});
+
 

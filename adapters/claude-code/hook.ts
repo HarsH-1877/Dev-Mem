@@ -43,7 +43,7 @@ async function main() {
 
         const { retrieveContext, generateInjectionString } = await import("../../core/retrieval/index.js");
         const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
-        const { filterUnseenNodes } = await import("../../core/retrieval/session-dedup.js");
+        const { filterUnseenNodes, filterUnseenWarnings } = await import("../../core/retrieval/session-dedup.js");
 
         // Files currently modified/staged in working tree (if any)
         const currentFiles = Array.isArray(gitSnap.status) ? gitSnap.status.map((s) => s.path) : [];
@@ -53,11 +53,16 @@ async function main() {
         const sessionStartPayload = payload as import("./types.js").SessionStartInput;
         const currentTask = sessionStartPayload.session_title ?? undefined;
 
-        const regressionMatches = checkRegressionRisk({
+        const regressionMatches = filterUnseenWarnings(
           projectRoot,
-          currentFiles,
-          confidenceThreshold: 0.6,
-        });
+          payload.session_id,
+          checkRegressionRisk({
+            projectRoot,
+            currentFiles,
+            currentTask,
+            confidenceThreshold: 0.6,
+          }),
+        );
         const regressionWarning = formatRegressionWarning(regressionMatches);
 
         // Normal ranked retrieval — passes currentTask for relevance scoring
@@ -149,11 +154,18 @@ async function main() {
         // PostToolUse gives us the file name; SessionStart does not.
         if (touchedFile && (toolName === "Write" || toolName === "Edit")) {
           const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
-          const matches = checkRegressionRisk({
+          const { filterUnseenWarnings } = await import("../../core/retrieval/session-dedup.js");
+          const editSnippet = stringFor(toolInput.new_string, stringFor(toolInput.content, "")).slice(0, 500);
+          const matches = filterUnseenWarnings(
             projectRoot,
-            currentFiles: [touchedFile],
-            confidenceThreshold: 0.6,
-          });
+            payload.session_id,
+            checkRegressionRisk({
+              projectRoot,
+              currentFiles: [touchedFile],
+              currentTask: editSnippet || undefined,
+              confidenceThreshold: 0.6,
+            }),
+          );
           const warning = formatRegressionWarning(matches);
           if (warning) {
             console.log(JSON.stringify({

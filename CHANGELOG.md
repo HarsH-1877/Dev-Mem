@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0 — 2026-11-28
+
+### Added
+- **SQLite FTS5 + BM25 Index (`core/graph/schema.ts`, `core/graph/index.ts`)**: Added `nodes_fts` virtual table (`tokenize = 'porter unicode61'`), delete trigger `nodes_fts_ad`, automatic startup backfill for existing SQLite stores, camelCase identifier expansion, and `GraphStore.searchFts()` weighting title (`3.0`), symbols (`2.5`), files (`2.0`), and content (`1.5`).
+- **Per-Session Regression Warning Deduplication (`core/retrieval/session-dedup.ts`)**: Added `filterUnseenWarnings()` persisting surfaced `FailedApproach` node IDs to `.dev-mem/sessions/<session-id>.warnings.json` and wired it across all four adapters (`claude-code`, `codex`, `cursor`, `opencode`).
+- **Multi-Repo Retrieval & Regression Benchmark (`eval/multi-repo-eval.ts`)**: Added deterministic 24-session benchmark across 3 repo corpora (`dev-mem-cli`, `ts-saas-api`, `fullstack-monorepo`) + `npm run eval:bm25` script (`95.2%` Hit@1 vs `90.5%` baseline, `0.952` MRR, `0.0%` negative leakage, `100.0%` hub-file warning suppression).
+
+### Changed
+- **Hybrid BM25 + Symbol/Directory Retrieval (`core/retrieval/index.ts`, `cli/commands/manage.ts`)**: Combined `searchFts` BM25 scoring with calibrated Jaccard topical gating (`>= 0.07`), symbol match boosts (`+0.25`), and parent-directory proximity credit (`0.4 × overlap`), plus FTS5-ranked `dev-memo search`.
+- **Topical Similarity Gate in Regression Intelligence (`core/regression/index.ts`)**: Added optional `currentTask` and `minTopicOverlap` (`0.04`) filtering so partial file overlaps on shared hub files (e.g., `src/index.ts`) are suppressed when the edit is topically unrelated.
+
 ## 0.7.0 — 2026-11-28
 
 ### Added

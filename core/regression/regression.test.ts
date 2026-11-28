@@ -167,3 +167,47 @@ describe("formatRegressionWarning", () => {
     expect(output).toContain("Detail of what went wrong");
   });
 });
+
+describe("Noise-free regression gating & per-session warning dedup (v0.8)", () => {
+  it("suppresses partial-overlap hub-file warnings unrelated to currentTask", async () => {
+    seedStore([
+      {
+        files: ["src/index.ts", "src/db/mongo.ts"],
+        title: "Using MongoDB driver crashed connection pool under load",
+      },
+      {
+        files: ["src/index.ts"],
+        title: "Exporting express middleware synchronously broke ESM startup",
+      },
+    ]);
+
+    // Unrelated edit on shared hub src/index.ts:
+    // - 0.5 overlapRatio MongoDB warning has 0 topical overlap -> suppressed
+    // - 1.0 overlapRatio exact single-file warning or topically matching warning -> preserved
+    const filtered = checkRegressionRisk({
+      projectRoot: tmpDir,
+      dbPath,
+      currentFiles: ["src/index.ts"],
+      currentTask: "Update README header comment",
+    });
+    expect(filtered.some((m) => m.node.title.includes("MongoDB"))).toBe(false);
+    expect(filtered.some((m) => m.node.title.includes("ESM startup"))).toBe(true);
+
+    // When currentTask IS topically related to MongoDB pool, partial file match fires cleanly
+    const related = checkRegressionRisk({
+      projectRoot: tmpDir,
+      dbPath,
+      currentFiles: ["src/index.ts"],
+      currentTask: "Fix MongoDB connection pool timeout",
+    });
+    expect(related.some((m) => m.node.title.includes("MongoDB"))).toBe(true);
+
+    // Session warning deduplication suppresses already-warned IDs
+    const { filterUnseenWarnings } = await import("../../core/retrieval/session-dedup.js");
+    const firstPass = filterUnseenWarnings(tmpDir, "sess-warn-1", related);
+    expect(firstPass.length).toBe(related.length);
+    const secondPass = filterUnseenWarnings(tmpDir, "sess-warn-1", related);
+    expect(secondPass).toEqual([]);
+  });
+});
+

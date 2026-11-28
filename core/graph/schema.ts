@@ -69,6 +69,19 @@ CREATE TABLE IF NOT EXISTS lifecycle_history (
 
 CREATE INDEX IF NOT EXISTS idx_lifecycle_history_node
   ON lifecycle_history (node_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+  node_id UNINDEXED,
+  title,
+  content,
+  files,
+  symbols,
+  tokenize = 'porter unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS nodes_fts_ad AFTER DELETE ON nodes BEGIN
+  DELETE FROM nodes_fts WHERE node_id = OLD.id;
+END;
 `;
 
 /**

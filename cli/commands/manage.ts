@@ -155,13 +155,16 @@ export function runSearch(cwd: string, args: string[]): CommandResult {
       nodes = nodes.filter((n) => n.type === (typeFilter as NodeType));
     }
 
+    const ftsRank = new Map(store.searchFts(query).map((h) => [h.id, h.score]));
     const matches = nodes.filter((n) => {
+      if (ftsRank.has(n.id)) return true;
       const haystack = [
         n.id,
         n.title,
         n.content,
         n.type,
         n.evidence.files.join(" "),
+        (n.evidence.symbols ?? []).join(" "),
       ]
         .join("\n")
         .toLowerCase();
@@ -172,7 +175,11 @@ export function runSearch(cwd: string, args: string[]): CommandResult {
       return { exitCode: 0, stdout: `No nodes matching "${query}".\n`, stderr: "" };
     }
 
-    matches.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    matches.sort((a, b) => {
+      const scoreDiff = (ftsRank.get(b.id) ?? 0) - (ftsRank.get(a.id) ?? 0);
+      if (Math.abs(scoreDiff) > 0.01) return scoreDiff;
+      return b.created_at.localeCompare(a.created_at);
+    });
     const lines = matches.map(formatNodeLine);
     lines.push(`\nMatched: ${matches.length} node(s)`);
     return { exitCode: 0, stdout: lines.join("\n") + "\n", stderr: "" };

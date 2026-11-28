@@ -86,16 +86,21 @@ async function main() {
 
         const { retrieveContext, generateInjectionString } = await import("../../core/retrieval/index.js");
         const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
+        const { filterUnseenWarnings } = await import("../../core/retrieval/session-dedup.js");
 
         const currentFiles = Array.isArray(gitSnap.status)
           ? gitSnap.status.map((s) => s.path)
           : [];
 
-        const regressionMatches = checkRegressionRisk({
+        const regressionMatches = filterUnseenWarnings(
           projectRoot,
-          currentFiles,
-          confidenceThreshold: 0.6,
-        });
+          payload.session_id,
+          checkRegressionRisk({
+            projectRoot,
+            currentFiles,
+            confidenceThreshold: 0.6,
+          }),
+        );
         const regressionWarning = formatRegressionWarning(regressionMatches);
 
         const nodes = retrieveContext({ projectRoot, currentFiles });
@@ -148,11 +153,18 @@ async function main() {
 
         if (touchedFile && (toolName === "Write" || toolName === "Edit" || toolName === "str_replace_editor")) {
           const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
-          const matches = checkRegressionRisk({
+          const { filterUnseenWarnings } = await import("../../core/retrieval/session-dedup.js");
+          const editSnippet = stringFor(toolInput.new_string, stringFor(toolInput.content, "")).slice(0, 500);
+          const matches = filterUnseenWarnings(
             projectRoot,
-            currentFiles: [touchedFile],
-            confidenceThreshold: 0.6,
-          });
+            payload.session_id,
+            checkRegressionRisk({
+              projectRoot,
+              currentFiles: [touchedFile],
+              currentTask: editSnippet || undefined,
+              confidenceThreshold: 0.6,
+            }),
+          );
           const warning = formatRegressionWarning(matches);
           if (warning) {
             console.log(JSON.stringify({
@@ -198,11 +210,18 @@ async function main() {
 
         if (touchedFile && (toolName === "Write" || toolName === "Edit" || toolName === "str_replace_editor")) {
           const { checkRegressionRisk, formatRegressionWarning } = await import("../../core/regression/index.js");
-          const matches = checkRegressionRisk({
+          const { filterUnseenWarnings } = await import("../../core/retrieval/session-dedup.js");
+          const editSnippet = stringFor(toolInput.new_string, stringFor(toolInput.content, "")).slice(0, 500);
+          const matches = filterUnseenWarnings(
             projectRoot,
-            currentFiles: [touchedFile],
-            confidenceThreshold: 0.6,
-          });
+            payload.session_id,
+            checkRegressionRisk({
+              projectRoot,
+              currentFiles: [touchedFile],
+              currentTask: editSnippet || undefined,
+              confidenceThreshold: 0.6,
+            }),
+          );
           const warning = formatRegressionWarning(matches);
           if (warning) {
             console.log(JSON.stringify({

@@ -19,12 +19,21 @@ export function runInspect(cwd: string, nodeId: string): { exitCode: number; std
   }
   const store = new GraphStore({ projectRoot: cwd });
   try {
-    const node = store.getNode(nodeId);
+    let node;
+    try {
+      node = store.resolveNode(nodeId);
+    } catch (error) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: `${error instanceof Error ? error.message : String(error)}\n`,
+      };
+    }
     if (!node) {
       return { exitCode: 1, stdout: "", stderr: `Node not found: ${nodeId}\n` };
     }
-    const history = store.listLifecycleHistory(nodeId);
-    const edges = store.listEdges(nodeId);
+    const history = store.listLifecycleHistory(node.id);
+    const edges = store.listEdges(node.id);
 
     const lines: string[] = [];
     lines.push(`id:              ${node.id}`);

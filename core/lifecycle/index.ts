@@ -19,7 +19,7 @@ export const ALLOWED_TRANSITIONS: Record<LifecycleState, readonly LifecycleState
   {
     observed: ["verified", "active", "superseded", "stale"],
     verified: ["active", "superseded", "stale"],
-    active: ["superseded", "stale"],
+    active: ["verified", "superseded", "stale"],
     superseded: [],
     stale: ["verified", "active", "superseded"],
   };

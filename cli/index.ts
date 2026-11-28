@@ -12,13 +12,21 @@ import { runQuery, runInspect } from "./commands/inspect.js";
 import { extractOnce, runWrap } from "./commands/extract.js";
 import { runBootstrap } from "./commands/bootstrap.js";
 import { runInit } from "./commands/init.js";
+import { runApprove, runEdit, runForget, runList, runSearch } from "./commands/manage.js";
+import { runReview } from "./commands/review.js";
 
 const COMMANDS = [
   "init",
   "install",
   "status",
   "query",
+  "list",
+  "search",
   "inspect",
+  "review",
+  "approve",
+  "edit",
+  "forget",
   "uninstall",
   "extract",
   "wrap",
@@ -72,7 +80,13 @@ function helpText(): string {
     "  status               Show graph and capture status",
     "  doctor [--live]      Check git, hooks, install path and LLM configuration",
     "  query \"<task>\"       Show context relevant to a task",
-    "  inspect <node-id>    Show full details of a graph node",
+    "  list [--state]       List stored knowledge nodes (short IDs shown)",
+    "  search \"<text>\"      Search node titles, contents, and linked files",
+    "  inspect <node-id>    Show full details of a graph node (supports ID prefix)",
+    "  review [--all]       Interactive review of pending observed memories",
+    "  approve <node-id>    Mark a node as verified (human-approved)",
+    "  edit <node-id>       Edit node --title and/or --content",
+    "  forget <node-id>     Retire a node (mark superseded so it is not injected)",
     "  extract <sessionId>  Run knowledge extraction for a session",
     "  prune                Remove events from already-extracted sessions from events.jsonl",
     "  sync                 Sync active/verified nodes with git-friendly .dev-mem/shared.jsonl",
@@ -89,7 +103,7 @@ function helpText(): string {
 
 export async function runCli(
   argv: string[],
-  options: { cwd?: string } = {},
+  options: { cwd?: string; input?: NodeJS.ReadableStream; output?: NodeJS.WritableStream } = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const [command, ...args] = argv;
 
@@ -153,8 +167,20 @@ export async function runCli(
       return await runWrap(cwd, args);
     } else if (command === "query") {
       return runQuery(cwd, args[0]);
+    } else if (command === "list") {
+      return runList(cwd, args);
+    } else if (command === "search") {
+      return runSearch(cwd, args);
     } else if (command === "inspect") {
       return runInspect(cwd, args[0]);
+    } else if (command === "review") {
+      return await runReview(cwd, args, { input: options.input, output: options.output });
+    } else if (command === "approve") {
+      return runApprove(cwd, args);
+    } else if (command === "edit") {
+      return runEdit(cwd, args);
+    } else if (command === "forget") {
+      return runForget(cwd, args);
     } else if (command === "prune") {
       const { removedEvents, keptEvents } = runPrune(cwd);
       return {

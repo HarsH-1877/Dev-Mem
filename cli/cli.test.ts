@@ -531,4 +531,171 @@ describe("dev-memo init (v0.6)", () => {
     expect(() => readFileSync(join(dir, ".mcp.json"), "utf8")).toThrow();
     expect(res.stdout).not.toContain("Bootstrapped");
   });
-});
+});
+
+describe("CLI curation commands: list, search, approve, edit, forget (v0.7)", () => {
+  let dir: string;
+  let idA: string;
+  let idB: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "dm-cli-curation-"));
+    initGitRepo(dir);
+    const store = new GraphStore({ projectRoot: dir });
+    const n1 = store.createNode({
+      id: "11111111-aaaa-4000-8000-000000000001",
+      type: "Decision",
+      title: "Use PostgreSQL for user accounts",
+      content: "Initial rationale",
+      lifecycle_state: "observed",
+      evidence: { ...BASE_EVIDENCE, files: ["src/db.ts"] },
+    });
+    const n2 = store.createNode({
+      id: "22222222-bbbb-4000-8000-000000000002",
+      type: "Constraint",
+      title: "Never log JWT tokens",
+      content: "Security rule",
+      lifecycle_state: "active",
+      evidence: { ...BASE_EVIDENCE, files: ["src/auth.ts"] },
+    });
+    idA = n1.id;
+    idB = n2.id;
+    store.close();
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("lists and searches nodes with short ID prefixes", async () => {
+    const listAll = await runCli(["list"], { cwd: dir });
+    expect(listAll.exitCode).toBe(0);
+    expect(listAll.stdout).toContain("11111111");
+    expect(listAll.stdout).toContain("22222222");
+
+    const filtered = await runCli(["list", "--state", "observed", "--type", "Decision"], { cwd: dir });
+    expect(filtered.stdout).toContain("Use PostgreSQL");
+    expect(filtered.stdout).not.toContain("Never log JWT");
+
+    const searched = await runCli(["search", "PostgreSQL"], { cwd: dir });
+    expect(searched.exitCode).toBe(0);
+    expect(searched.stdout).toContain("11111111");
+    expect(searched.stdout).toContain("Use PostgreSQL");
+
+    // Inspect also accepts short 8-char prefix
+    const inspected = await runCli(["inspect", "11111111"], { cwd: dir });
+    expect(inspected.exitCode).toBe(0);
+    expect(inspected.stdout).toContain(`id:              ${idA}`);
+  });
+
+  it("approves, edits, and forgets nodes using ID prefixes", async () => {
+    const approved = await runCli(["approve", "11111111"], { cwd: dir });
+    expect(approved.exitCode).toBe(0);
+    expect(approved.stdout).toContain("verified");
+
+    const edited = await runCli(["edit", "11111111", "--title", "Use PostgreSQL 16", "--content", "Updated detail"], {
+      cwd: dir,
+    });
+    expect(edited.exitCode).toBe(0);
+
+    const forgot = await runCli(["forget", "22222222"], { cwd: dir });
+    expect(forgot.exitCode).toBe(0);
+    expect(forgot.stdout).toContain("superseded");
+
+    const store = new GraphStore({ projectRoot: dir });
+    expect(store.getNode(idA)?.lifecycle_state).toBe("verified");
+    expect(store.getNode(idA)?.title).toBe("Use PostgreSQL 16");
+    expect(store.getNode(idA)?.content).toBe("Updated detail");
+    expect(store.getNode(idB)?.lifecycle_state).toBe("superseded");
+    store.close();
+  });
+});
+
+describe("dev-memo review TUI (v0.7)", () => {
+  let dir: string;
+  let id1: string;
+  let id2: string;
+  let id3: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "dm-cli-review-"));
+    initGitRepo(dir);
+    const store = new GraphStore({ projectRoot: dir });
+    try {
+      id1 = store.createNode({
+        type: "Decision",
+        title: "First observed decision",
+        content: "Original content 1",
+        lifecycle_state: "observed",
+        evidence: { ...BASE_EVIDENCE, files: ["src/a.ts"] },
+      }).id;
+      id2 = store.createNode({
+        type: "FailedApproach",
+        title: "Second observed gotcha",
+        content: "Original content 2",
+        lifecycle_state: "observed",
+        evidence: { ...BASE_EVIDENCE, files: ["src/b.ts"] },
+      }).id;
+      id3 = store.createNode({
+        type: "Constraint",
+        title: "Third observed constraint",
+        content: "Original content 3",
+        lifecycle_state: "observed",
+        evidence: { ...BASE_EVIDENCE, files: ["src/c.ts"] },
+      }).id;
+    } finally {
+      store.close();
+    }
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("handles approve, edit+approve, and discard over interactive streams", async () => {
+    const { PassThrough } = await import("node:stream");
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let captured = "";
+    output.on("data", (chunk) => {
+      captured += chunk.toString();
+    });
+
+    // 1: approve ("a")
+    // 2: edit ("e"), new title, keep content (""), then approve ("a")
+    // 3: discard ("d")
+    input.end("a\ne\nEdited second gotcha\n\na\nd\n");
+
+    const res = await runCli(["review"], { cwd: dir, input, output });
+    expect(res.exitCode).toBe(0);
+    expect(captured).toContain("First observed decision");
+    expect(res.stdout).toContain("approved: 2");
+    expect(res.stdout).toContain("discarded: 1");
+
+    const store = new GraphStore({ projectRoot: dir });
+    expect(store.getNode(id1)?.lifecycle_state).toBe("verified");
+    expect(store.getNode(id2)?.lifecycle_state).toBe("verified");
+    expect(store.getNode(id2)?.title).toBe("Edited second gotcha");
+    expect(store.getNode(id2)?.content).toBe("Original content 2");
+    expect(store.getNode(id3)?.lifecycle_state).toBe("superseded");
+    store.close();
+  });
+
+  it("supports skip and quit without modifying remaining nodes", async () => {
+    const { PassThrough } = await import("node:stream");
+    const input = new PassThrough();
+    const output = new PassThrough();
+    input.end("s\nq\n");
+
+    const res = await runCli(["review"], { cwd: dir, input, output });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("skipped: 1");
+
+    const store = new GraphStore({ projectRoot: dir });
+    expect(store.getNode(id1)?.lifecycle_state).toBe("observed");
+    expect(store.getNode(id2)?.lifecycle_state).toBe("observed");
+    expect(store.getNode(id3)?.lifecycle_state).toBe("observed");
+    store.close();
+  });
+});
+

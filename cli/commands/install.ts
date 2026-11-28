@@ -440,3 +440,69 @@ export function findStaleHooks(cwd: string): string[] {
   }
   return stale;
 }
+
+const MCP_ENTRY = {
+  command: "npx",
+  args: ["-y", "dev-memo", "mcp"],
+};
+
+function mergeJsonFile(filePath: string, updater: (current: Record<string, any>) => void): void {
+  let obj: Record<string, any> = {};
+  if (existsSync(filePath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        obj = parsed;
+      }
+    } catch {}
+  }
+  updater(obj);
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, JSON.stringify(obj, null, 2) + "\n", "utf8");
+}
+
+/**
+ * Idempotently registers `dev-memo mcp` in project MCP configuration files for
+ * the installed agents. Returns relative config file paths written/verified.
+ */
+export function registerMcpConfigs(cwd: string, agents: string[]): string[] {
+  const registered: string[] = [];
+
+  if (agents.includes("claude-code")) {
+    const target = join(cwd, ".mcp.json");
+    mergeJsonFile(target, (obj) => {
+      if (!obj.mcpServers || typeof obj.mcpServers !== "object") obj.mcpServers = {};
+      if (!obj.mcpServers["dev-memo"]) {
+        obj.mcpServers["dev-memo"] = MCP_ENTRY;
+      }
+    });
+    registered.push(".mcp.json");
+  }
+
+  if (agents.includes("cursor")) {
+    const target = join(cwd, ".cursor", "mcp.json");
+    mergeJsonFile(target, (obj) => {
+      if (!obj.mcpServers || typeof obj.mcpServers !== "object") obj.mcpServers = {};
+      if (!obj.mcpServers["dev-memo"]) {
+        obj.mcpServers["dev-memo"] = MCP_ENTRY;
+      }
+    });
+    registered.push(".cursor/mcp.json");
+  }
+
+  if (agents.includes("opencode")) {
+    const rootCfg = join(cwd, "opencode.json");
+    const rel = existsSync(rootCfg) ? "opencode.json" : ".opencode/opencode.json";
+    const target = join(cwd, rel);
+    mergeJsonFile(target, (obj) => {
+      if (!obj.mcp || typeof obj.mcp !== "object") obj.mcp = {};
+      if (!obj.mcp.servers || typeof obj.mcp.servers !== "object") obj.mcp.servers = {};
+      if (!obj.mcp.servers["dev-memo"]) {
+        obj.mcp.servers["dev-memo"] = MCP_ENTRY;
+      }
+    });
+    registered.push(rel);
+  }
+
+  return registered;
+}

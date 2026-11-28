@@ -11,8 +11,10 @@ import { runStatus, runDoctor } from "./commands/diagnostics.js";
 import { runQuery, runInspect } from "./commands/inspect.js";
 import { extractOnce, runWrap } from "./commands/extract.js";
 import { runBootstrap } from "./commands/bootstrap.js";
+import { runInit } from "./commands/init.js";
 
 const COMMANDS = [
+  "init",
   "install",
   "status",
   "query",
@@ -64,6 +66,7 @@ function helpText(): string {
     `Usage: dev-memo <${COMMANDS.join("|")}>`,
     "",
     "Commands:",
+    "  init [agent...]      One-step setup: install hooks, wire MCP, verify backend, and bootstrap starter memory",
     "  install [agent...]   Install hooks (claude-code, codex, cursor, opencode); auto-detects if omitted",
     "  bootstrap [--from f] Mine git reverts & instruction files into starter memory ($0 LLM cost)",
     "  status               Show graph and capture status",
@@ -113,7 +116,9 @@ export async function runCli(
   const cwd = options.cwd ?? process.cwd();
 
   try {
-    if (command === "install") {
+    if (command === "init") {
+      return await runInit(cwd, args);
+    } else if (command === "install") {
       const { installedAgents: agents, defaultedToClaude } = installHooks(cwd, args);
       let out = `${getBanner()}\n\ndev-memo hooks installed (agents: ${agents.join(", ")})\n`;
       if (defaultedToClaude) {

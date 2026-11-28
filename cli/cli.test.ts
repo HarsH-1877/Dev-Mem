@@ -491,4 +491,44 @@ describe("dev-memo bootstrap (v0.6)", () => {
     expect(res.exitCode).toBe(0);
     expect(res.stdout).toContain("Bootstrapped 1 memory node(s)");
   });
+});
+
+describe("dev-memo init (v0.6)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "dm-cli-init-"));
+    initGitRepo(dir);
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("wires hooks, registers MCP config, checks provider, and bootstraps memory in one command", async () => {
+    writeFileSync(join(dir, "AGENTS.md"), "- Always validate inputs with zod before touching DB.\n", "utf8");
+    const res = await runCli(["init", "claude-code", "cursor"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("Hooks installed: claude-code, cursor");
+    expect(res.stdout).toContain("MCP registered:");
+    expect(res.stdout).toContain("Bootstrapped 1 starter memory node(s)");
+
+    const claudeMcp = JSON.parse(readFileSync(join(dir, ".mcp.json"), "utf8"));
+    expect(claudeMcp.mcpServers["dev-memo"]).toEqual({
+      command: "npx",
+      args: ["-y", "dev-memo", "mcp"],
+    });
+
+    const cursorMcp = JSON.parse(readFileSync(join(dir, ".cursor", "mcp.json"), "utf8"));
+    expect(cursorMcp.mcpServers["dev-memo"]).toEqual({
+      command: "npx",
+      args: ["-y", "dev-memo", "mcp"],
+    });
+  });
+
+  it("honors --no-mcp and --no-bootstrap flags", async () => {
+    writeFileSync(join(dir, "AGENTS.md"), "- Always use ESM imports cleanly across files.\n", "utf8");
+    const res = await runCli(["init", "claude-code", "--no-mcp", "--no-bootstrap"], { cwd: dir });
+    expect(res.exitCode).toBe(0);
+    expect(() => readFileSync(join(dir, ".mcp.json"), "utf8")).toThrow();
+    expect(res.stdout).not.toContain("Bootstrapped");
+  });
 });

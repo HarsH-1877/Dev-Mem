@@ -73,7 +73,11 @@ async function main() {
         const regressionWarning = formatRegressionWarning(regressionMatches);
 
         // Adaptive-budget retrieval — same default as Claude Code adapter.
-        const nodes = retrieveContext({ projectRoot, currentFiles });
+        const nodes = retrieveContext({
+          projectRoot,
+          currentFiles,
+          currentSessionId: payload.session_id,
+        });
         const contextBlock = generateInjectionString(nodes);
 
         const additionalContext = [regressionWarning, contextBlock]

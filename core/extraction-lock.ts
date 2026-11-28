@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { getDevMemDir } from "./local-data.js";
 
 const STALE_LOCK_MS = 5 * 60 * 1000;
 
 function statePath(projectRoot: string, sessionId: string, suffix: string): string {
-  const dir = join(projectRoot, ".dev-mem", "extractions");
+  const dir = join(getDevMemDir(projectRoot), "extractions");
   mkdirSync(dir, { recursive: true });
   return join(dir, `${encodeURIComponent(sessionId)}.${suffix}`);
 }

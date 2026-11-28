@@ -70,7 +70,12 @@ async function main() {
         // Budget is omitted intentionally: retrieveContext applies an adaptive
         // default (nodeCount × 18, clamped 80–2000) that creates real selection
         // pressure at any graph size without over-injecting on small graphs.
-        const nodes = retrieveContext({ projectRoot, currentFiles, currentTask });
+        const nodes = retrieveContext({
+          projectRoot,
+          currentFiles,
+          currentTask,
+          currentSessionId: payload.session_id,
+        });
         const unseenNodes = filterUnseenNodes(projectRoot, payload.session_id, nodes);
         const contextBlock = generateInjectionString(unseenNodes);
 
@@ -98,6 +103,7 @@ async function main() {
         const candidates = retrieveContext({
           projectRoot,
           currentTask: promptText,
+          currentSessionId: payload.session_id,
           minRelevance: 0.08,
         });
         // Gate was applied on topical relevance inside retrieveContext; dedup unseen nodes

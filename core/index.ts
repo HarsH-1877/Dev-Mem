@@ -18,11 +18,14 @@ export {
 } from "./lifecycle/index.js";
 export {
   ensureLocalDataDir,
+  getDevMemDir,
   getGraphDbPath,
   getEventsLogPath,
   getExtractionLogPath,
   getMemoryMarkdownPath,
+  isLinkedWorktree,
   readLastExtractionLog,
+  resolveStorageRoot,
   MEMORY_MD_FILENAME,
   type ExtractionLogEntry,
 } from "./local-data.js";
@@ -56,6 +59,12 @@ export {
   type ExportMarkdownOptions,
   type ExportMarkdownResult,
 } from "./sync/markdown.js";
+export {
+  runPrContext,
+  detectChangedFilesFromGit,
+  type PrContextOptions,
+  type PrContextResult,
+} from "./ci/pr-context.js";
 export {
   bootstrapProject,
   type BootstrapOptions,

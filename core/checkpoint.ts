@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { getDevMemDir } from "./local-data.js";
 
 export const DEFAULT_EXTRACTION_EVENT_THRESHOLD = 10;
 
 /** Invalid or unsafe configuration deliberately falls back to the documented default. */
 export function getExtractionEventThreshold(projectRoot: string): number {
-  const configPath = join(projectRoot, ".dev-mem", "config.yml");
+  const configPath = join(getDevMemDir(projectRoot), "config.yml");
   if (!existsSync(configPath)) return DEFAULT_EXTRACTION_EVENT_THRESHOLD;
   try {
     const content = readFileSync(configPath, "utf8");

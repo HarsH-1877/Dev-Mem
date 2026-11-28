@@ -20,12 +20,17 @@ export interface RetrievalContext {
   /** Files the agent is about to touch, used for both relevance fallback and
    *  graph-proximity scoring. */
   currentFiles?: string[];
+  /** Current agent session ID, used to prioritize recent sibling-session/worktree discoveries. */
+  currentSessionId?: string;
+  /** Time window (minutes) for live sibling-session inbox boost (default 120). */
+  liveInboxWindowMinutes?: number;
 }
 
 export interface RetrievedNode extends KnowledgeNode {
   score: number;
   relevance: number;
   cost: number;
+  isSiblingDiscovery?: boolean;
 }
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
@@ -321,6 +326,8 @@ export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
   const budgetTokens = context.budgetTokens ?? adaptiveBudget(nodes.length);
 
   // Score every candidate node
+  const liveWindowMs = (context.liveInboxWindowMinutes ?? 120) * 60 * 1000;
+  const nowMs = Date.now();
   let scoredNodes: RetrievedNode[] = nodes.map(node => {
     const jaccardRel = calculateRelevance(node, currentTask, currentFiles);
     const bm25Rel    = ftsScores.get(node.id) ?? 0;
@@ -343,12 +350,31 @@ export function retrieveContext(context: RetrievalContext): RetrievedNode[] {
 
     const groundedMultiplier = node.evidence.grounded === false ? 0.85 : 1.0;
 
-    const score = Math.min(1.0, baseScore * lifecycleMultiplier * groundedMultiplier);
+    const createdMs = Date.parse(node.updated_at || node.created_at);
+    const isRecent = Number.isFinite(createdMs) && nowMs - createdMs <= liveWindowMs;
+    const isSiblingDiscovery = Boolean(
+      context.currentSessionId &&
+        isRecent &&
+        node.evidence.session_id &&
+        node.evidence.session_id !== context.currentSessionId,
+    );
+    const siblingMultiplier = isSiblingDiscovery ? 1.15 : 1.0;
+
+    const score = Math.min(
+      1.0,
+      baseScore * lifecycleMultiplier * groundedMultiplier * siblingMultiplier,
+    );
 
     const injectionText = formatNode(node);
     const cost = estimateTokens(injectionText);
 
-    return { ...node, score, relevance, cost };
+    return {
+      ...node,
+      score,
+      relevance,
+      cost,
+      ...(context.currentSessionId ? { isSiblingDiscovery } : {}),
+    };
   });
 
   if (context.minRelevance !== undefined) {

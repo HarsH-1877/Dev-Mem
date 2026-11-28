@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { CaptureEvent, GitSnapshotEvent, ToolCallEvent } from "./events.js";
 import { EventLog } from "./log.js";
 import { isExtractionComplete } from "../extraction-lock.js";
-import { getEventsLogPath } from "../local-data.js";
+import { getDevMemDir, getEventsLogPath } from "../local-data.js";
 
 const PASS_STDOUT_LIMIT = 300;
 const MAX_DIFF_LINES = 500;
@@ -146,7 +146,7 @@ export function pruneExtractedEvents(projectRoot: string): { removedEvents: numb
   }
 
   if (removedEvents > 0) {
-    const tmpPath = join(projectRoot, ".dev-mem", `events.jsonl.tmp.${process.pid}`);
+    const tmpPath = join(getDevMemDir(projectRoot), `events.jsonl.tmp.${process.pid}`);
     const body = kept.length > 0 ? kept.map((e) => JSON.stringify(e)).join("\n") + "\n" : "";
     writeFileSync(tmpPath, body, "utf8");
     try {

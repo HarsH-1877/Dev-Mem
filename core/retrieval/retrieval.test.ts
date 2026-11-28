@@ -655,6 +655,55 @@ describe("FTS5/BM25 hybrid retrieval & symbol/directory weighting (v0.8)", () =>
     const proxBilling = calculateGraphProximity(dirSibling, ["src/billing/worker-0.ts"]);
     expect(proxAuth).toBeGreaterThan(proxBilling);
   });
+
+  it("boosts recent sibling-session discoveries (live inbox) when currentSessionId differs", () => {
+    const store = new GraphStore({ projectRoot: testDir });
+    const now = new Date().toISOString();
+    const sameSession = store.createNode({
+      type: "Decision",
+      title: "Use Redis lock for checkout queue",
+      content: "Local checkout queue locking detail",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "1111111111111111111111111111111111111111",
+        files: ["src/queue.ts"],
+        session_id: "sess-current",
+        agent: "claude-code",
+        timestamp: now,
+        confidence: 0.8,
+      },
+    });
+    const siblingSession = store.createNode({
+      type: "Decision",
+      title: "Use Redis lock for checkout queue",
+      content: "Local checkout queue locking detail",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "2222222222222222222222222222222222222222",
+        files: ["src/queue.ts"],
+        session_id: "sess-sibling-wt2",
+        agent: "codex",
+        timestamp: now,
+        confidence: 0.8,
+      },
+    });
+    store.close();
+
+    const hits = retrieveContext({
+      projectRoot: testDir,
+      currentTask: "Redis lock for checkout queue",
+      currentSessionId: "sess-current",
+      budgetTokens: 2000,
+    } as any);
+
+    const sibHit = hits.find((h) => h.id === siblingSession.id) as any;
+    const sameHit = hits.find((h) => h.id === sameSession.id) as any;
+    expect(sibHit).toBeDefined();
+    expect(sameHit).toBeDefined();
+    expect(sibHit.isSiblingDiscovery).toBe(true);
+    expect(sameHit.isSiblingDiscovery).toBe(false);
+    expect(sibHit.score).toBeGreaterThan(sameHit.score);
+  });
 });
 
 

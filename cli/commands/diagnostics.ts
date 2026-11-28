@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GraphStore } from "../../core/graph/index.js";
 import { resolveProviderForProject } from "../../core/llm/index.js";
-import { getEventsLogPath, readLastExtractionLog } from "../../core/local-data.js";
+import { getEventsLogPath, isLinkedWorktree, readLastExtractionLog, resolveStorageRoot } from "../../core/local-data.js";
 import { buildResolverSource } from "../hook-resolver.js";
 import { findStaleHooks } from "./install.js";
 
@@ -51,6 +51,10 @@ export function runStatus(cwd: string): string {
       : `Last extraction: ${lastExt.timestamp} — FAILED (${lastExt.error || "unknown error"})\n`;
   } else {
     output += "Last extraction: None\n";
+  }
+
+  if (isLinkedWorktree(cwd)) {
+    output += `Worktree storage: ${resolveStorageRoot(cwd)} (shared with main worktree)\n`;
   }
 
   const stale = findStaleHooks(cwd);

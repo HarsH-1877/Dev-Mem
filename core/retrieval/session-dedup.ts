@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { getDevMemDir } from "../local-data.js";
 
 function sessionStatePath(projectRoot: string, sessionId: string, suffix: string): string {
-  const dir = join(projectRoot, ".dev-mem", "sessions");
+  const dir = join(getDevMemDir(projectRoot), "sessions");
   mkdirSync(dir, { recursive: true });
   return join(dir, `${encodeURIComponent(sessionId)}.${suffix}.json`);
 }
@@ -50,7 +51,7 @@ function filterUnseenById<T>(
 export function hasSessionInjections(projectRoot: string, sessionId: string): boolean {
   if (!sessionId) return false;
   try {
-    return existsSync(join(projectRoot, ".dev-mem", "sessions", `${encodeURIComponent(sessionId)}.injected.json`));
+    return existsSync(join(getDevMemDir(projectRoot), "sessions", `${encodeURIComponent(sessionId)}.injected.json`));
   } catch {
     return false;
   }

@@ -759,6 +759,19 @@ describe("dev-memo export --md & sync MEMORY.md integration (v0.7)", () => {
       rmSync(fakeHome, { recursive: true, force: true });
     }
   });
+
+  it("generates PR context and verifies matching nodes via dev-memo pr-context", async () => {
+    const outPath = join(dir, ".dev-mem", "pr-comment.md");
+    const res = await runCli(
+      ["pr-context", "--files", "core/graph/index.ts", "--title", "Enable WAL mode", "--verify-on-merge", "--out", outPath],
+      { cwd: dir },
+    );
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("<!-- dev-mem-pr-context -->");
+    expect(res.stdout).toContain("Keep WAL enabled");
+    expect(existsSync(outPath)).toBe(true);
+    expect(readFileSync(outPath, "utf8")).toContain("verified");
+  });
 });
 
 

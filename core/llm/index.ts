@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { getDevMemDir } from "../local-data.js";
 import type { LlmProvider, ProviderResolutionOptions } from "./types.js";
 import { createAnthropicProvider } from "./anthropic.js";
 import { createOpenAIProvider } from "./openai.js";
@@ -111,7 +112,7 @@ export function resolveProvider(options?: ProviderResolutionOptions): LlmProvide
  * Config file values are lower priority than explicit env vars/options.
  */
 export function resolveProviderForProject(projectRoot: string, options?: ProviderResolutionOptions): LlmProvider | null {
-  const configPath = join(projectRoot, ".dev-mem", "config.yml");
+  const configPath = join(getDevMemDir(projectRoot), "config.yml");
   let fileProvider: string | undefined;
   let fileModel: string | undefined;
   let fileBaseUrl: string | undefined;

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { handleMcpRequest } from "./server.js";
 import { GraphStore } from "../graph/index.js";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -15,11 +15,13 @@ describe("Zero-Daemon MCP Server (stdio JSON-RPC)", () => {
   });
 
   it("responds to initialize and tools/list", async () => {
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
     const initRes = await handleMcpRequest(
       { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
       dir,
     );
     expect(initRes.result.serverInfo.name).toBe("dev-memo");
+    expect(initRes.result.serverInfo.version).toBe(pkg.version);
 
     const listRes = await handleMcpRequest(
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },

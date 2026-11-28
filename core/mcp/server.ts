@@ -1,9 +1,27 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { GraphStore, NODE_TYPES, type NodeType } from "../graph/index.js";
 import { retrieveContext } from "../retrieval/index.js";
 import { checkRegressionRisk, formatRegressionWarning } from "../regression/index.js";
 import { collectGitSnapshot } from "../capture/git.js";
 import { sanitizeText } from "../capture/sanitize.js";
+
+function readMcpServerVersion(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ["../../package.json", "../../../package.json"]) {
+    try {
+      const candidate = join(here, rel);
+      if (!existsSync(candidate)) continue;
+      const pkg = JSON.parse(readFileSync(candidate, "utf8"));
+      if (pkg?.name === "dev-memo" && typeof pkg.version === "string") return pkg.version;
+    } catch {
+      // try next
+    }
+  }
+  return "0.5.0";
+}
 
 export const MCP_TOOLS = [
   {
@@ -73,7 +91,7 @@ export async function handleMcpRequest(request: any, projectRoot: string): Promi
         result: {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "dev-memo", version: "0.4.0" },
+          serverInfo: { name: "dev-memo", version: readMcpServerVersion() },
         },
       };
     }

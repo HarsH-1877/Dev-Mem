@@ -451,4 +451,25 @@ describe("dev-memo sync", () => {
     expect(res.stdout).toContain("sync");
     expect(res.stdout).toContain("Sync active/verified nodes with git-friendly .dev-mem/shared.jsonl");
   });
+});
+
+describe("Extraction visibility log (v0.5)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "dm-cli-extlog-"));
+    initGitRepo(dir);
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("writes failures to .dev-mem/extraction.log and surfaces last extraction in status", async () => {
+    await runCli(["extract", "missing-sess"], { cwd: dir });
+    const logPath = join(dir, ".dev-mem", "extraction.log");
+    expect(readFileSync(logPath, "utf8")).toContain("missing-sess");
+
+    const status = await runCli(["status"], { cwd: dir });
+    expect(status.stdout).toContain("Last extraction:");
+    expect(status.stdout).toContain("FAILED");
+  });
 });

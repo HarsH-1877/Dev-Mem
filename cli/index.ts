@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync, readdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
-import { ensureLocalDataDir, getEventsLogPath } from "../core/local-data.js";
+import { ensureLocalDataDir, getEventsLogPath, readLastExtractionLog } from "../core/local-data.js";
 import { GraphStore } from "../core/graph/index.js";
 import { acquireExtractionLock, markExtractionComplete } from "../core/extraction-lock.js";
 import { retrieveContext, generateInjectionString } from "../core/retrieval/index.js";
@@ -567,6 +567,15 @@ function runStatus(cwd: string): string {
     output += "\nLast capture: None\n";
   }
 
+  const lastExt = readLastExtractionLog(cwd);
+  if (lastExt) {
+    output += lastExt.success
+      ? `Last extraction: ${lastExt.timestamp} — ok (${lastExt.nodes_created} nodes via ${lastExt.provider})\n`
+      : `Last extraction: ${lastExt.timestamp} — FAILED (${lastExt.error || "unknown error"})\n`;
+  } else {
+    output += "Last extraction: None\n";
+  }
+
   const stale = findStaleHooks(cwd);
   if (stale.length > 0) {
     output += `\n⚠ ${stale.length} Dev-Mem hook file(s) use the old format (machine-specific paths):\n`
@@ -636,6 +645,11 @@ export async function runDoctor(cwd: string, opts: { live?: boolean } = {}): Pro
       }
     }
   }
+  const lastExt = readLastExtractionLog(cwd);
+  if (lastExt && !lastExt.success) {
+    lines.push(`! Last extraction failed (${lastExt.timestamp}): ${lastExt.error || "unknown error"}`);
+  }
+
   return { ok, lines };
 }
 

@@ -20,6 +20,9 @@ export {
   ensureLocalDataDir,
   getGraphDbPath,
   getEventsLogPath,
+  getExtractionLogPath,
+  readLastExtractionLog,
+  type ExtractionLogEntry,
 } from "./local-data.js";
 export {
   runExtraction,

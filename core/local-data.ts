@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** Local data directory at the project root (spec §3.3). */
@@ -6,6 +6,7 @@ export const DEV_MEM_DIR = ".dev-mem";
 export const GRAPH_DB_FILENAME = "graph.sqlite";
 export const EVENTS_LOG_FILENAME = "events.jsonl";
 export const SHARED_GRAPH_FILENAME = "shared.jsonl";
+export const EXTRACTION_LOG_FILENAME = "extraction.log";
 export const GITIGNORE_ENTRY = ".dev-mem/*\n!.dev-mem/shared.jsonl";
 
 export function getDevMemDir(projectRoot: string): string {
@@ -22,6 +23,49 @@ export function getEventsLogPath(projectRoot: string): string {
 
 export function getSharedGraphPath(projectRoot: string): string {
   return join(getDevMemDir(projectRoot), SHARED_GRAPH_FILENAME);
+}
+
+export function getExtractionLogPath(projectRoot: string): string {
+  return join(getDevMemDir(projectRoot), EXTRACTION_LOG_FILENAME);
+}
+
+export interface ExtractionLogEntry {
+  timestamp: string;
+  session_id: string;
+  provider: string;
+  success: boolean;
+  nodes_created: number;
+  error?: string;
+}
+
+export function appendExtractionLog(projectRoot: string, entry: ExtractionLogEntry): void {
+  try {
+    ensureLocalDataDir(projectRoot);
+    appendFileSync(getExtractionLogPath(projectRoot), JSON.stringify(entry) + "\n", "utf8");
+  } catch {
+    // Never throw from diagnostic logging
+  }
+}
+
+export function readLastExtractionLog(projectRoot: string): ExtractionLogEntry | null {
+  try {
+    const logPath = getExtractionLogPath(projectRoot);
+    if (!existsSync(logPath)) return null;
+    const lines = readFileSync(logPath, "utf8").split(/\r?\n/).filter((l) => l.trim() !== "");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const parsed = JSON.parse(lines[i]);
+        if (parsed && typeof parsed === "object" && typeof parsed.session_id === "string") {
+          return parsed as ExtractionLogEntry;
+        }
+      } catch {
+        // skip corrupt line
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**

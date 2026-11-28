@@ -1,6 +1,7 @@
 import { EventLog } from "../capture/log.js";
 import { collectGitSnapshot } from "../capture/git.js";
 import { compactSessionEventsForPrompt } from "../capture/compact.js";
+import { appendExtractionLog } from "../local-data.js";
 import { GraphStore } from "../graph/index.js";
 import type { CaptureEvent, FileTouchEvent, GitSnapshotEvent, ToolCallEvent } from "../capture/events.js";
 import type { CreateNodeInput, KnowledgeNode, NodeType } from "../graph/types.js";
@@ -49,6 +50,18 @@ function normalizeNodeType(rawType: string): NodeType | null {
  */
 export async function runExtraction(options: ExtractionOptions): Promise<ExtractionResult> {
   const { projectRoot, sessionId, apiKey, mockLlm, customLlmResponse, model } = options;
+  let usedProvider = customLlmResponse !== undefined ? "custom" : (mockLlm || process.env.DEV_MEM_MOCK_LLM === "1" ? "mock" : "none");
+  const recordResult = (res: ExtractionResult): ExtractionResult => {
+    appendExtractionLog(projectRoot, {
+      timestamp: new Date().toISOString(),
+      session_id: sessionId,
+      provider: usedProvider,
+      success: res.success,
+      nodes_created: res.nodes.length,
+      ...(res.error ? { error: res.error } : {}),
+    });
+    return res;
+  };
 
   try {
     // 1. Read events for this session from .dev-mem/events.jsonl
@@ -58,7 +71,7 @@ export async function runExtraction(options: ExtractionOptions): Promise<Extract
 
     if (sessionEvents.length === 0) {
       console.warn(`[dev-mem] No events found in log for session: ${sessionId}`);
-      return { success: false, nodes: [], error: `No events found for session ${sessionId}` };
+      return recordResult({ success: false, nodes: [], error: `No events found for session ${sessionId}` });
     }
 
     // 2. Discover context from events (commit, agent, touched files)
@@ -241,8 +254,9 @@ ${compactedEvents.map((e) => JSON.stringify(e)).join("\n")}
       });
       if (!llm) {
         console.warn("[dev-mem] No LLM provider available. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or DEV_MEM_LLM_BASE_URL. Skipping extraction.");
-        return { success: false, nodes: [], error: "No LLM provider available — set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or DEV_MEM_LLM_BASE_URL" };
+        return recordResult({ success: false, nodes: [], error: "No LLM provider available — set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or DEV_MEM_LLM_BASE_URL" });
       }
+      usedProvider = llm.name;
 
       try {
         responseText = await llm.complete(
@@ -253,7 +267,7 @@ ${compactedEvents.map((e) => JSON.stringify(e)).join("\n")}
       } catch (llmErr: any) {
         const msg = `LLM call failed (${llm.name}): ${llmErr.message}`;
         console.error(`[dev-mem] ${msg}`);
-        return { success: false, nodes: [], error: msg };
+        return recordResult({ success: false, nodes: [], error: msg });
       }
     }
 
@@ -276,13 +290,13 @@ ${compactedEvents.map((e) => JSON.stringify(e)).join("\n")}
     } catch (parseErr: any) {
       const msg = `Failed to parse LLM JSON output: ${parseErr.message}`;
       console.error(`[dev-mem] ${msg}`);
-      return { success: false, nodes: [], error: msg };
+      return recordResult({ success: false, nodes: [], error: msg });
     }
 
     if (!parsed || !Array.isArray(parsed.nodes)) {
       const msg = "LLM output missing 'nodes' array";
       console.error(`[dev-mem] ${msg}`);
-      return { success: false, nodes: [], error: msg };
+      return recordResult({ success: false, nodes: [], error: msg });
     }
 
     // 6. Insert proposed nodes into GraphStore
@@ -499,11 +513,11 @@ ${compactedEvents.map((e) => JSON.stringify(e)).join("\n")}
       console.error(`[dev-mem] Node promotion failed: ${pErr.message}`);
     }
 
-    return { success: true, nodes: insertedNodes };
+    return recordResult({ success: true, nodes: insertedNodes });
   } catch (unexpectedErr: any) {
     // Top-level error safety: extraction must never crash the caller (SessionEnd hook)
     const msg = `Unexpected error during extraction: ${unexpectedErr.message}`;
     console.error(`[dev-mem] ${msg}`);
-    return { success: false, nodes: [], error: msg };
+    return recordResult({ success: false, nodes: [], error: msg });
   }
 }

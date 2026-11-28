@@ -17,10 +17,14 @@ export interface LlmProvider {
 export interface ProviderResolutionOptions {
   /** Explicit API key (overrides env var) */
   apiKey?: string;
-  /** Force a specific provider: "anthropic" | "openai" | "gemini" | "openai-compatible" */
+  /** Force a specific provider: "anthropic" | "openai" | "gemini" | "openai-compatible" | "cli-claude" | "cli-codex" | "cli-gemini" */
   provider?: string;
   /** Model override (e.g. "gpt-5-mini", "claude-haiku-4-5") */
   model?: string;
   /** Base URL for OpenAI-compatible endpoints (e.g. Ollama, Groq) */
   baseUrl?: string;
+  /** Session's active agent (e.g. "claude-code", "codex") used to prefer matching zero-key CLI */
+  sessionAgent?: string;
+  /** Explicit override of detected host CLIs (mainly for tests) */
+  availableClis?: string[];
 }

@@ -251,10 +251,11 @@ ${compactedEvents.map((e) => JSON.stringify(e)).join("\n")}
         provider: options.provider,
         model,
         baseUrl: options.baseUrl,
+        sessionAgent: agent,
       });
       if (!llm) {
-        console.warn("[dev-mem] No LLM provider available. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or DEV_MEM_LLM_BASE_URL. Skipping extraction.");
-        return recordResult({ success: false, nodes: [], error: "No LLM provider available — set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or DEV_MEM_LLM_BASE_URL" });
+        console.warn("[dev-mem] No LLM provider available. Authenticate a host CLI (claude, codex, gemini) or set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or DEV_MEM_LLM_BASE_URL. Skipping extraction.");
+        return recordResult({ success: false, nodes: [], error: "No LLM provider available — authenticate a host CLI (claude, codex, gemini) or set an API key / DEV_MEM_LLM_BASE_URL" });
       }
       usedProvider = llm.name;
 

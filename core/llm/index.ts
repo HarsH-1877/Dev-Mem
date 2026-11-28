@@ -4,22 +4,33 @@ import type { LlmProvider, ProviderResolutionOptions } from "./types.js";
 import { createAnthropicProvider } from "./anthropic.js";
 import { createOpenAIProvider } from "./openai.js";
 import { createGeminiProvider } from "./gemini.js";
+import {
+  createCliAgentProvider,
+  detectAvailableCliAgents,
+  mapSessionAgentToCli,
+  type CliAgentKind,
+} from "./cli-agent.js";
 
 export type { LlmProvider, ProviderResolutionOptions } from "./types.js";
+export type { CliAgentKind } from "./cli-agent.js";
 export { createAnthropicProvider } from "./anthropic.js";
 export { createOpenAIProvider } from "./openai.js";
 export { createGeminiProvider } from "./gemini.js";
+export {
+  createCliAgentProvider,
+  detectAvailableCliAgents,
+  mapSessionAgentToCli,
+} from "./cli-agent.js";
 
 /**
- * Resolves an LLM provider based on explicit options or environment variables.
+ * Resolves an LLM provider based on explicit overrides, host agent CLI, or API keys.
  *
  * Priority order (first match wins):
- * 1. Explicit `provider` + `apiKey` in options
- * 2. DEV_MEM_LLM_PROVIDER + DEV_MEM_LLM_API_KEY env vars (user override)
- * 3. DEV_MEM_LLM_BASE_URL env var (OpenAI-compatible, e.g. Ollama)
- * 4. ANTHROPIC_API_KEY env var
- * 5. OPENAI_API_KEY env var
- * 6. GEMINI_API_KEY or GOOGLE_API_KEY env var
+ * 1. Explicit `provider` / `DEV_MEM_LLM_PROVIDER` (anthropic, openai, gemini, openai-compatible, cli-claude, cli-codex, cli-gemini)
+ * 2. `DEV_MEM_LLM_BASE_URL` env var or option (Ollama, Groq, OpenRouter, LM Studio)
+ * 3. Installed host agent CLI matching `sessionAgent` (zero extra API keys, unless DEV_MEM_DISABLE_CLI_LLM=1)
+ * 4. Ambient API key env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY / GOOGLE_API_KEY)
+ * 5. Any other installed host agent CLI on PATH (claude, codex, gemini)
  *
  * Returns null if no usable provider is found.
  */
@@ -30,6 +41,15 @@ export function resolveProvider(options?: ProviderResolutionOptions): LlmProvide
   const model = options?.model || process.env.DEV_MEM_LLM_MODEL;
 
   // 1. Explicit provider requested
+  if (provider === "cli-claude" || provider === "claude") {
+    return createCliAgentProvider("claude", { model });
+  }
+  if (provider === "cli-codex" || provider === "codex") {
+    return createCliAgentProvider("codex", { model });
+  }
+  if (provider === "cli-gemini") {
+    return createCliAgentProvider("gemini", { model });
+  }
   if (provider === "anthropic") {
     const key = apiKey || process.env.ANTHROPIC_API_KEY;
     if (key) return createAnthropicProvider(key, model);
@@ -51,7 +71,18 @@ export function resolveProvider(options?: ProviderResolutionOptions): LlmProvide
     return createOpenAIProvider(apiKey || "ollama", model, baseUrl);
   }
 
-  // 3. Auto-detect from well-known env vars
+  // 3. Zero-API-key host CLI matching the active session agent
+  const cliDisabled = process.env.DEV_MEM_DISABLE_CLI_LLM === "1";
+  const availableClis: CliAgentKind[] = cliDisabled
+    ? []
+    : (options?.availableClis as CliAgentKind[] | undefined) ?? detectAvailableCliAgents();
+
+  const matchingCli = mapSessionAgentToCli(options?.sessionAgent);
+  if (matchingCli && availableClis.includes(matchingCli)) {
+    return createCliAgentProvider(matchingCli, { model });
+  }
+
+  // 4. Auto-detect from well-known env vars
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) {
     return createAnthropicProvider(anthropicKey, model);
@@ -65,6 +96,11 @@ export function resolveProvider(options?: ProviderResolutionOptions): LlmProvide
   const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   if (geminiKey) {
     return createGeminiProvider(geminiKey, model);
+  }
+
+  // 5. Fallback to any available host CLI when no API keys exist (e.g., Cursor/OpenCode users with claude/gemini CLI installed)
+  if (availableClis.length > 0) {
+    return createCliAgentProvider(availableClis[0], { model });
   }
 
   return null;
@@ -104,5 +140,7 @@ export function resolveProviderForProject(projectRoot: string, options?: Provide
     model: options?.model !== undefined ? options.model : fileModel,
     baseUrl: options?.baseUrl !== undefined ? options.baseUrl : fileBaseUrl,
     apiKey: options?.apiKey !== undefined ? options.apiKey : fileApiKey,
+    sessionAgent: options?.sessionAgent,
+    availableClis: options?.availableClis,
   });
 }

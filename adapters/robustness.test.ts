@@ -171,4 +171,20 @@ describe("adapter robustness", () => {
       expect(reloaded.getEvents().map((e) => e.id)).toEqual(["2"]);
     } finally { warn.mockRestore(); rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it("exits immediately without writing events when DEV_MEM_DISABLE_HOOKS=1", () => {
+    const dir = tempProject();
+    try {
+      const hookPath = join(projectRoot, "dist", "adapters", "claude-code", "hook.js");
+      const res = spawnSync(process.execPath, [hookPath], {
+        cwd: dir,
+        input: JSON.stringify({ session_id: "loop-guard", cwd: dir, hook_event_name: "SessionStart" }),
+        env: { ...process.env, DEV_MEM_DISABLE_HOOKS: "1" },
+        encoding: "utf8",
+      });
+      expect(res.status).toBe(0);
+      expect(res.stdout.trim()).toBe("");
+      expect(() => readFileSync(join(dir, ".dev-mem", "events.jsonl"), "utf8")).toThrow();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });

@@ -334,6 +334,7 @@ describe("dev-memo doctor", () => {
   it("fails when no LLM provider is configured", async () => {
     initGitRepo(dir);
     for (const k of ["ANTHROPIC_API_KEY","OPENAI_API_KEY","GEMINI_API_KEY","GOOGLE_API_KEY","DEV_MEM_LLM_BASE_URL","DEV_MEM_LLM_PROVIDER","DEV_MEM_LLM_API_KEY"]) delete process.env[k];
+    process.env.DEV_MEM_DISABLE_CLI_LLM = "1";
     const r = await runDoctor(dir);
     expect(r.ok).toBe(false);
     expect(r.lines.join("\n")).toContain("✗ No LLM provider configured");

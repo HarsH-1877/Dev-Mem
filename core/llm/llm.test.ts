@@ -10,7 +10,7 @@ import { DEFAULT_MODEL as GEMINI_DEFAULT } from "./gemini.js";
 import { DEFAULT_MODEL as OPENAI_DEFAULT } from "./openai.js";
 
 describe("LLM Provider Resolution", () => {
-  it("returns null when no API keys are available", () => {
+  it("returns null when no API keys and no CLI agents are available", () => {
     const saved = { ...process.env };
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
@@ -19,11 +19,63 @@ describe("LLM Provider Resolution", () => {
     delete process.env.DEV_MEM_LLM_BASE_URL;
     delete process.env.DEV_MEM_LLM_PROVIDER;
     delete process.env.DEV_MEM_LLM_API_KEY;
-    
-    const provider = resolveProvider();
+
+    const provider = resolveProvider({ availableClis: [] });
     expect(provider).toBeNull();
 
     Object.assign(process.env, saved);
+  });
+
+  it("prefers matching host CLI agent over ambient API keys when no explicit override is set", () => {
+    const saved = { ...process.env };
+    try {
+      delete process.env.DEV_MEM_LLM_PROVIDER;
+      delete process.env.DEV_MEM_LLM_API_KEY;
+      delete process.env.DEV_MEM_LLM_BASE_URL;
+      delete process.env.DEV_MEM_DISABLE_CLI_LLM;
+      process.env.OPENAI_API_KEY = "ambient-openai-key";
+
+      const provider = resolveProvider({
+        sessionAgent: "claude-code",
+        availableClis: ["claude", "codex"],
+      });
+      expect(provider?.name).toBe("cli-claude");
+    } finally {
+      if (saved.OPENAI_API_KEY === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = saved.OPENAI_API_KEY;
+      Object.assign(process.env, saved);
+    }
+  });
+
+  it("falls back to API key if host CLI matching sessionAgent is unavailable and prioritizes API key before unrelated CLIs", () => {
+    const saved = { ...process.env };
+    try {
+      delete process.env.DEV_MEM_LLM_PROVIDER;
+      delete process.env.DEV_MEM_LLM_API_KEY;
+      delete process.env.DEV_MEM_LLM_BASE_URL;
+      delete process.env.DEV_MEM_DISABLE_CLI_LLM;
+      delete process.env.OPENAI_API_KEY;
+      process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+
+      const provider = resolveProvider({
+        sessionAgent: "cursor",
+        availableClis: ["gemini"],
+      });
+      expect(provider?.name).toBe("anthropic");
+
+      delete process.env.ANTHROPIC_API_KEY;
+      const cliFallback = resolveProvider({
+        sessionAgent: "cursor",
+        availableClis: ["gemini"],
+      });
+      expect(cliFallback?.name).toBe("cli-gemini");
+    } finally {
+      if (saved.ANTHROPIC_API_KEY === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = saved.ANTHROPIC_API_KEY;
+      if (saved.OPENAI_API_KEY === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = saved.OPENAI_API_KEY;
+      Object.assign(process.env, saved);
+    }
   });
 
   it("resolves Anthropic provider when provider=anthropic and apiKey given", () => {

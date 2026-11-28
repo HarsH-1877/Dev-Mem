@@ -262,6 +262,7 @@ describe("Batched LLM Extraction (spec §7.2)", () => {
       delete process.env.DEV_MEM_LLM_BASE_URL;
       delete process.env.DEV_MEM_LLM_API_KEY;
       delete process.env.DEV_MEM_LLM_PROVIDER;
+      process.env.DEV_MEM_DISABLE_CLI_LLM = "1";
 
       // Create at least one event for session "provider-test" so extraction doesn't short-circuit
       const capture = new DeterministicCapture({

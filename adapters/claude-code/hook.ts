@@ -17,6 +17,9 @@ function parseInput(): ClaudeCodeHookInput | null {
 }
 
 async function main() {
+  if (process.env.DEV_MEM_DISABLE_HOOKS === "1") {
+    process.exit(0);
+  }
   const payload = parseInput();
   if (!payload) {
     process.exit(0);

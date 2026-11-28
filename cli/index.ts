@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pruneExtractedEvents } from "../core/capture/compact.js";
 import { syncSharedGraph } from "../core/sync/index.js";
+import { exportMemoryMarkdown } from "../core/sync/markdown.js";
 import { getBanner } from "./banner.js";
 import { installHooks, uninstallHooks, findStaleHooks } from "./commands/install.js";
 import { runStatus, runDoctor } from "./commands/diagnostics.js";
@@ -12,19 +13,28 @@ import { runQuery, runInspect } from "./commands/inspect.js";
 import { extractOnce, runWrap } from "./commands/extract.js";
 import { runBootstrap } from "./commands/bootstrap.js";
 import { runInit } from "./commands/init.js";
+import { runApprove, runEdit, runForget, runList, runSearch } from "./commands/manage.js";
+import { runReview } from "./commands/review.js";
 
 const COMMANDS = [
   "init",
   "install",
   "status",
   "query",
+  "list",
+  "search",
   "inspect",
+  "review",
+  "approve",
+  "edit",
+  "forget",
   "uninstall",
   "extract",
   "wrap",
   "doctor",
   "prune",
   "sync",
+  "export",
   "mcp",
   "bootstrap",
 ] as const;
@@ -68,14 +78,21 @@ function helpText(): string {
     "Commands:",
     "  init [agent...]      One-step setup: install hooks, wire MCP, verify backend, and bootstrap starter memory",
     "  install [agent...]   Install hooks (claude-code, codex, cursor, opencode); auto-detects if omitted",
-    "  bootstrap [--from f] Mine git reverts & instruction files into starter memory ($0 LLM cost)",
+    "  bootstrap [--from f] Mine git reverts, CLAUDE.md/AGENTS.md & --claude-memory ($0 cost)",
     "  status               Show graph and capture status",
     "  doctor [--live]      Check git, hooks, install path and LLM configuration",
     "  query \"<task>\"       Show context relevant to a task",
-    "  inspect <node-id>    Show full details of a graph node",
+    "  list [--state]       List stored knowledge nodes (short IDs shown)",
+    "  search \"<text>\"      Search node titles, contents, and linked files",
+    "  inspect <node-id>    Show full details of a graph node (supports ID prefix)",
+    "  review [--all]       Interactive review of pending observed memories",
+    "  approve <node-id>    Mark a node as verified (human-approved)",
+    "  edit <node-id>       Edit node --title and/or --content",
+    "  forget <node-id>     Retire a node (mark superseded so it is not injected)",
     "  extract <sessionId>  Run knowledge extraction for a session",
     "  prune                Remove events from already-extracted sessions from events.jsonl",
-    "  sync                 Sync active/verified nodes with git-friendly .dev-mem/shared.jsonl",
+    "  sync                 Sync active/verified nodes with git-friendly .dev-mem/shared.jsonl & MEMORY.md",
+    "  export --md          Export git-diffable MEMORY.md summary (optional --agents-md, --out)",
     "  wrap <command...>    Run a command, then flush captured events",
     "  mcp                  Run the stdio Model Context Protocol (MCP) server",
     "  uninstall [--purge]  Remove hooks (--purge also deletes .dev-mem/)",
@@ -89,7 +106,7 @@ function helpText(): string {
 
 export async function runCli(
   argv: string[],
-  options: { cwd?: string } = {},
+  options: { cwd?: string; input?: NodeJS.ReadableStream; output?: NodeJS.WritableStream } = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const [command, ...args] = argv;
 
@@ -153,8 +170,20 @@ export async function runCli(
       return await runWrap(cwd, args);
     } else if (command === "query") {
       return runQuery(cwd, args[0]);
+    } else if (command === "list") {
+      return runList(cwd, args);
+    } else if (command === "search") {
+      return runSearch(cwd, args);
     } else if (command === "inspect") {
       return runInspect(cwd, args[0]);
+    } else if (command === "review") {
+      return await runReview(cwd, args, { input: options.input, output: options.output });
+    } else if (command === "approve") {
+      return runApprove(cwd, args);
+    } else if (command === "edit") {
+      return runEdit(cwd, args);
+    } else if (command === "forget") {
+      return runForget(cwd, args);
     } else if (command === "prune") {
       const { removedEvents, keptEvents } = runPrune(cwd);
       return {
@@ -167,6 +196,31 @@ export async function runCli(
       return {
         exitCode: 0,
         stdout: `Synced .dev-mem/shared.jsonl (imported: ${res.importedNodes}, updated: ${res.updatedNodes}, exported: ${res.exportedNodes} active/verified nodes).\n`,
+        stderr: "",
+      };
+    } else if (command === "export") {
+      const outIdx = args.indexOf("--out");
+      const outPath = outIdx !== -1 && args[outIdx + 1] ? args[outIdx + 1] : undefined;
+      const maxIdx = args.indexOf("--max-lines");
+      const maxLines =
+        maxIdx !== -1 && args[maxIdx + 1] ? Number.parseInt(args[maxIdx + 1], 10) : undefined;
+      if (maxLines !== undefined && (!Number.isFinite(maxLines) || maxLines <= 0)) {
+        return { exitCode: 1, stdout: "", stderr: "Invalid --max-lines value.\n" };
+      }
+      const agentsMd = args.includes("--agents-md");
+      const includeObserved = args.includes("--all");
+      const res = exportMemoryMarkdown(cwd, {
+        outPath,
+        agentsMd,
+        maxLines,
+        includeObserved,
+      });
+      return {
+        exitCode: 0,
+        stdout:
+          `Exported ${res.exportedNodes} of ${res.totalCuratedNodes} node(s) to ${res.path}` +
+          (res.agentsMdUpdated ? " and updated AGENTS.md" : "") +
+          ".\n",
         stderr: "",
       };
     } else if (command === "mcp") {

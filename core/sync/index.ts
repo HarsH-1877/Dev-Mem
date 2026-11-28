@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { GraphStore, type KnowledgeEdge, type KnowledgeNode } from "../graph/index.js";
 import { canTransition } from "../lifecycle/index.js";
 import { ensureLocalDataDir, getSharedGraphPath, SHARED_GRAPH_FILENAME } from "../local-data.js";
+import { exportMemoryMarkdown } from "./markdown.js";
 
 export { SHARED_GRAPH_FILENAME, getSharedGraphPath };
 
@@ -204,6 +205,7 @@ export function syncSharedGraph(projectRoot: string): {
 } {
   const imp = importSharedGraph(projectRoot);
   const exp = exportSharedGraph(projectRoot);
+  exportMemoryMarkdown(projectRoot);
   return {
     importedNodes: imp.importedNodes,
     updatedNodes: imp.updatedNodes,

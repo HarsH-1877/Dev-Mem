@@ -114,8 +114,10 @@ Mines recent Git revert commits (`FailedApproach` nodes) and repository instruct
 
 ```bash
 dev-memo bootstrap
-# Include personal Claude auto-memory or extra notes:
-dev-memo bootstrap --from ~/.claude/projects/<id>/memory/MEMORY.md
+# Auto-discover and import Claude Code's local project MEMORY.md:
+dev-memo bootstrap --claude-memory
+# Or include any specific markdown file:
+dev-memo bootstrap --from docs/architecture-notes.md
 ```
 
 Example output:
@@ -248,11 +250,37 @@ Synced .dev-mem/shared.jsonl (imported: 2, updated: 1, exported: 5 active/verifi
 
 #### Team Knowledge Sharing via Git
 
-While Dev-Mem's internal SQLite database (`.dev-mem/graph.sqlite`) and raw event logs (`.dev-mem/events.jsonl`) remain strictly machine-local and gitignored (`.dev-mem/*`), `.dev-mem/shared.jsonl` is explicitly un-ignored (`!.dev-mem/shared.jsonl`). Teams share curated architectural decisions, conventions, constraints, and failure warnings simply by committing `.dev-mem/shared.jsonl` into git:
+While Dev-Mem's internal SQLite database (`.dev-mem/graph.sqlite`) and raw event logs (`.dev-mem/events.jsonl`) remain strictly machine-local and gitignored (`.dev-mem/*`), `.dev-mem/shared.jsonl` and `.dev-mem/MEMORY.md` are explicitly un-ignored (`!.dev-mem/shared.jsonl`, `!.dev-mem/MEMORY.md`). Teams share curated architectural decisions, conventions, constraints, and failure warnings simply by committing them into git:
 
-1. **Deterministic line format:** Records are sorted deterministically by ID, ensuring clean, merge-friendly git diffs with zero line jitter.
+1. **Deterministic line format:** Records in `.dev-mem/shared.jsonl` are sorted by ID, and `.dev-mem/MEMORY.md` is updated alongside every `dev-memo sync` so pull requests remain human-reviewable.
 2. **Noise isolation:** Local scratch observations (`observed` state) stay local; curated (`active` or `verified`) knowledge and their `superseded`/`stale` retirements sync cleanly across teammates using `updated_at` last-writer-wins.
 3. **Automatic session-start import:** When teammates pull git changes (`git pull`), Dev-Mem automatically imports incoming nodes and retirements into their local SQLite store on the next agent `SessionStart`.
+
+---
+
+### Human Curation & Markdown Projection
+
+Inspect, review, approve, edit, retire, and export local knowledge nodes directly from the terminal (all node commands accept 8-char short ID prefixes):
+
+```bash
+# List and filter stored memories (shows [8-char] short IDs)
+dev-memo list --state observed --type Decision
+
+# Search titles, contents, and linked files
+dev-memo search "postgresql"
+
+# Interactive review TUI for pending observed nodes ([a]pprove / [e]dit / [s]kip / [d]iscard / [q]uit)
+dev-memo review
+
+# Scriptable single-node curation (using short ID prefixes)
+dev-memo inspect 3f2a1b4c
+dev-memo approve 3f2a1b4c
+dev-memo edit 3f2a1b4c --title "Use PostgreSQL 16" --content "Rationale..."
+dev-memo forget 3f2a1b4c --reason "Replaced by SQLite in V2"
+
+# Generate git-diffable .dev-mem/MEMORY.md and optionally refresh bounded AGENTS.md summary
+dev-memo export --md --agents-md
+```
 
 ---
 
@@ -292,7 +320,7 @@ Prints the full detail of a single knowledge node — all fields, evidence, life
 dev-memo inspect <uuid>
 ```
 
-Get node IDs from `dev-memo status` (lists counts by type) or from `dev-memo query` output (each result includes the evidence commit; run query first to find candidates). Example output:
+Get node IDs from `dev-memo list` / `dev-memo search` (shows 8-character short IDs that work directly with `inspect`, `approve`, `edit`, and `forget`) or from `dev-memo query`. Example output:
 
 ```
 id:              3f2a1b4c-...

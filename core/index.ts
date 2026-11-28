@@ -21,7 +21,9 @@ export {
   getGraphDbPath,
   getEventsLogPath,
   getExtractionLogPath,
+  getMemoryMarkdownPath,
   readLastExtractionLog,
+  MEMORY_MD_FILENAME,
   type ExtractionLogEntry,
 } from "./local-data.js";
 export {
@@ -49,6 +51,11 @@ export {
   type SharedEdgeRecord,
   type SharedRecord,
 } from "./sync/index.js";
+export {
+  exportMemoryMarkdown,
+  type ExportMarkdownOptions,
+  type ExportMarkdownResult,
+} from "./sync/markdown.js";
 export {
   bootstrapProject,
   type BootstrapOptions,

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 — 2026-11-28
+
+### Added
+- **Human Curation CLI (`list`, `search`, `approve`, `edit`, `forget`, `review`)**: Full terminal workflow for managing local knowledge (`cli/commands/manage.ts`, `cli/commands/review.ts`). Supports `--state`, `--type`, `--limit` filtering, content sanitization on edits, interactive `[a]pprove / [e]dit / [s]kip / [d]iscard / [q]uit` review TUI (`dev-memo review` with non-TTY fallback), and unique short-ID prefix lookup (`GraphStore.resolveNode`) across `inspect`, `approve`, `edit`, and `forget`.
+- **Git-Diffable Markdown Projection (`dev-memo export --md`)**: Deterministic curated summary generator (`core/sync/markdown.ts`, also exported at `dev-memo`) producing `.dev-mem/MEMORY.md` grouped by node type with configurable `--max-lines` and optional `--agents-md` bounded `<!-- dev-mem:start -->`...`<!-- dev-mem:end -->` block updates.
+- **Claude Code Auto-Memory Bootstrap (`--claude-memory`)**: `dev-memo bootstrap --claude-memory` automatically discovers `~/.claude/projects/<encoded>/memory/*.md` files for the current repo.
+
+### Changed
+- **Automatic `MEMORY.md` Sync & `.gitignore` Un-ignore**: `dev-memo sync` automatically regenerates `.dev-mem/MEMORY.md`, and `ensureDevMemGitignore()` adds `!.dev-mem/MEMORY.md` alongside `!.dev-mem/shared.jsonl` so PR reviewers can read curated team memory in plain Markdown.
+- **Lifecycle Transition**: Allowed `active → verified` transitions in `core/lifecycle/index.ts` so humans can explicitly verify auto-promoted active nodes via `dev-memo approve` or `dev-memo review`.
+
 ## 0.6.0 — 2026-11-28
 
 ### Added

@@ -182,6 +182,35 @@ export class GraphStore {
     return row ? this.rowToNode(row) : undefined;
   }
 
+  /**
+   * Resolve a node by full ID or unique ID prefix (minimum 4 chars recommended).
+   * Throws an error if a prefix matches multiple nodes.
+   */
+  resolveNode(idOrPrefix: string): KnowledgeNode | undefined {
+    const trimmed = idOrPrefix.trim();
+    if (!trimmed) return undefined;
+
+    const exact = this.getNode(trimmed);
+    if (exact) return exact;
+
+    const escaped = trimmed.replace(/[\\%_]/g, "\\$&");
+    const rows = this.db
+      .prepare(`SELECT * FROM nodes WHERE id LIKE ? ESCAPE '\\' ORDER BY created_at ASC`)
+      .all(`${escaped}%`) as unknown as NodeRow[];
+
+    if (rows.length === 0) return undefined;
+    if (rows.length > 1) {
+      const sample = rows
+        .slice(0, 4)
+        .map((r) => r.id.slice(0, 10))
+        .join(", ");
+      throw new Error(
+        `Ambiguous node ID prefix "${trimmed}" matches ${rows.length} nodes (${sample}${rows.length > 4 ? ", ..." : ""}). Provide a longer prefix.`,
+      );
+    }
+    return this.rowToNode(rows[0]);
+  }
+
   updateNode(nodeId: string, patch: UpdateNodeInput): KnowledgeNode {
     const existing = this.getNode(nodeId);
     if (!existing) {

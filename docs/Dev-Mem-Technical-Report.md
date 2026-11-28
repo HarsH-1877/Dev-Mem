@@ -1,6 +1,6 @@
 # Dev-Mem — Technical Report
 
-**Version:** 0.6.0 (Zero-Friction Init & Cold-Start Bootstrap)  
+**Version:** 0.7.0 (Human Curation, Review TUI & Markdown Projection)  
 **Date:** November 2026  
 **Author:** Harsh Asalkar  
 **Repository:** [github.com/HarsH-1877/Dev-Mem](https://github.com/HarsH-1877/Dev-Mem)  
@@ -28,6 +28,7 @@
    - 6.9 Zero-Daemon Model Context Protocol (MCP) Server
    - 6.10 Git-Friendly Team Memory Sync (`.dev-mem/shared.jsonl`)
    - 6.11 Deterministic Cold-Start Bootstrap (`core/bootstrap/`)
+   - 6.12 Git-Diffable Markdown Projection & Human Curation
 7. [Agent Adapters](#7-agent-adapters)
 8. [CLI Interface](#8-cli-interface)
 9. [Evaluation Methodology & Results](#9-evaluation-methodology--results)
@@ -932,7 +933,7 @@ observed → verified → active → stale ┘
 |------|-------------------|
 | `observed` | `verified`, `active`, `superseded`, `stale` |
 | `verified` | `active`, `superseded`, `stale` |
-| `active` | `superseded`, `stale` |
+| `active` | `verified`, `superseded`, `stale` |
 | `superseded` | *(terminal)* |
 | `stale` | `verified`, `active`, `superseded` |
 
@@ -1091,6 +1092,18 @@ In v0.6.0, Dev-Mem eliminates the cold-start problem so freshly initialized repo
 
 ---
 
+### 6.12 Git-Diffable Markdown Projection & Human Curation
+
+**Locations:** `core/sync/markdown.ts`, `cli/commands/manage.ts`, `cli/commands/review.ts`  
+**CLI Commands:** `list`, `search`, `approve`, `edit`, `forget`, `review`, `export --md [--agents-md]`
+
+In v0.7.0, Dev-Mem adds direct human governance and PR-reviewable text artifacts over the SQLite graph:
+- **Short-ID Prefix Resolution (`GraphStore.resolveNode`):** All node inspection and curation commands (`inspect`, `approve`, `edit`, `forget`) resolve unique 8-character prefixes (erroring loudly if a prefix is ambiguous across multiple nodes).
+- **Interactive Review TUI (`dev-memo review`):** Walks through pending `observed` nodes (or `--all`) with `[a]pprove`, `[e]dit` (secret-sanitized), `[s]kip`, `[d]iscard`, and `[q]uit`, falling back to explicit CLI guidance in non-TTY environments.
+- **Deterministic Markdown Projection (`.dev-mem/MEMORY.md`):** `exportMemoryMarkdown()` writes a concise, section-grouped summary of curated (`verified` / `active`) nodes ordered deterministically so git diffs stay clean. `.dev-mem/*` ignores runtime state while un-ignoring both `!.dev-mem/shared.jsonl` and `!.dev-mem/MEMORY.md`, and `dev-memo sync` keeps both files in sync. Passing `--agents-md` maintains a bounded `<!-- dev-mem:start -->`...`<!-- dev-mem:end -->` pointer block inside `AGENTS.md` without modifying surrounding human documentation.
+
+---
+
 ## 7. Agent Adapters
 
 **Location:** `adapters/`
@@ -1180,14 +1193,21 @@ Hooks are **best-effort observers** and must never terminate or disrupt the host
 |---------|---------|---------|
 | `dev-memo init [agent...]` | One-step setup: install hooks, register MCP configs, verify backend, and bootstrap | `dev-memo init` |
 | `dev-memo install [agent...]` | Detect or target agents, wire hooks, create `.dev-mem/` | `dev-memo install` |
-| `dev-memo bootstrap [--from f]` | Mine git reverts and repo instruction files into starter nodes ($0 LLM cost) | `dev-memo bootstrap` |
+| `dev-memo bootstrap [--from f]` | Mine git reverts, repo instructions, and `--claude-memory` ($0 LLM cost) | `dev-memo bootstrap --claude-memory` |
 | `dev-memo status` | Show graph size, lifecycle breakdown, last capture & extraction | `dev-memo status` |
 | `dev-memo doctor [--live]` | Check git, hooks currency, resolver health, and LLM configuration | `dev-memo doctor --live` |
 | `dev-memo query "<text>"` | Preview what context would be injected for a task | `dev-memo query "optimize database queries"` |
-| `dev-memo inspect <node-id>` | Full detail of a single node | `dev-memo inspect c4a1e9b2-...` |
+| `dev-memo list [--state s]` | List stored nodes with short IDs, types, and lifecycle states | `dev-memo list --state observed` |
+| `dev-memo search "<text>"` | Search node titles, contents, and linked evidence files | `dev-memo search "postgresql"` |
+| `dev-memo inspect <node-id>` | Full detail of a single node (supports short ID prefixes) | `dev-memo inspect c4a1e9b2` |
+| `dev-memo review [--all]` | Interactive terminal review of pending `observed` memories | `dev-memo review` |
+| `dev-memo approve <node-id>` | Human-verify a node (`observed`/`active` -> `verified`) | `dev-memo approve c4a1e9b2` |
+| `dev-memo edit <node-id>` | Update node `--title` and/or `--content` | `dev-memo edit c4a1e9b2 --title "..."` |
+| `dev-memo forget <node-id>` | Mark a node `superseded` (with optional `--reason`) | `dev-memo forget c4a1e9b2 --reason "..."` |
 | `dev-memo extract <session>` | Manually trigger extraction | `dev-memo extract sess_001` |
 | `dev-memo prune` | Remove events from already-extracted sessions in `events.jsonl` | `dev-memo prune` |
-| `dev-memo sync` | Bidirectionally sync active/verified nodes with `.dev-mem/shared.jsonl` | `dev-memo sync` |
+| `dev-memo sync` | Sync `shared.jsonl` and regenerate `.dev-mem/MEMORY.md` | `dev-memo sync` |
+| `dev-memo export --md` | Export `.dev-mem/MEMORY.md` and optional `--agents-md` pointer block | `dev-memo export --md --agents-md` |
 | `dev-memo mcp` | Launch zero-daemon stdio Model Context Protocol (MCP) server | `dev-memo mcp` |
 | `dev-memo wrap <cmd> [args]` | Run a command and flush events on exit | `dev-memo wrap cursor-agent` |
 | `dev-memo uninstall [--purge]` | Remove hooks; `--purge` deletes `.dev-mem/` | `dev-memo uninstall --purge` |

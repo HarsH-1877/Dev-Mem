@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0 — 2026-11-28
+
+### Added
+- **Worktree-Shared Storage (`core/local-data.ts`)**: `resolveStorageRoot()` detects linked Git worktrees via `git rev-parse --git-common-dir` and points all `.dev-mem/` artifacts (`graph.sqlite`, `events.jsonl`, extraction locks/retries, session dedup/warnings, `config.yml`, `shared.jsonl`, `MEMORY.md`) to the main repository root so parallel worktree agents share one WAL database automatically (`DEV_MEM_ISOLATE_WORKTREE=1` opts out). Surfacing added in `dev-memo status` via `isLinkedWorktree()`.
+- **Cross-Session "Live Inbox" Priority Boost (`core/retrieval/index.ts`)**: Added `currentSessionId` and `liveInboxWindowMinutes` (`120` default) to `RetrievalContext`; recent discoveries captured by sibling sessions/worktrees receive a `1.15×` relevance-gated boost (`isSiblingDiscovery: true`). Wired `currentSessionId: payload.session_id` across all four agent hooks.
+- **GitHub PR Context & Auto-Verification (`core/ci/pr-context.ts`, `dev-memo pr-context`, `.github/actions/pr-context/action.yml`)**: Pure offline PR analyzer that imports `.dev-mem/shared.jsonl` on clean CI runners, renders an idempotent `<!-- dev-mem-pr-context -->` Markdown comment with regression warnings and relevant constraints/decisions, supports `--verify-on-merge` to transition matching non-failure nodes to `verified`, and includes a composite GitHub Action.
+
 ## 0.8.0 — 2026-11-28
 
 ### Added

@@ -1,6 +1,6 @@
 # Dev-Mem — Technical Report
 
-**Version:** 0.8.0 (FTS5/BM25 Retrieval, Regression Dedup & Multi-Repo Benchmark)  
+**Version:** 0.9.0 (Worktree-Shared Memory, Live Inbox & GitHub PR Context)  
 **Date:** November 2026  
 **Author:** Harsh Asalkar  
 **Repository:** [github.com/HarsH-1877/Dev-Mem](https://github.com/HarsH-1877/Dev-Mem)  
@@ -29,6 +29,7 @@
    - 6.10 Git-Friendly Team Memory Sync (`.dev-mem/shared.jsonl`)
    - 6.11 Deterministic Cold-Start Bootstrap (`core/bootstrap/`)
    - 6.12 Git-Diffable Markdown Projection & Human Curation
+   - 6.13 Worktree-Shared Storage, Live Inbox & PR Context CI
 7. [Agent Adapters](#7-agent-adapters)
 8. [CLI Interface](#8-cli-interface)
 9. [Evaluation Methodology & Results](#9-evaluation-methodology--results)
@@ -1104,6 +1105,17 @@ In v0.7.0, Dev-Mem adds direct human governance and PR-reviewable text artifacts
 
 ---
 
+### 6.13 Worktree-Shared Storage, Live Inbox & PR Context CI
+
+**Locations:** `core/local-data.ts`, `core/retrieval/index.ts`, `core/ci/pr-context.ts`, `cli/commands/pr-context.ts`, `.github/actions/pr-context/action.yml`
+
+In v0.9.0, Dev-Mem extends single-checkout memory across parallel multi-agent worktrees and CI code review:
+- **Worktree-Shared `.dev-mem/` (`resolveStorageRoot`):** Linked `git worktree` directories resolve `git rev-parse --git-common-dir` to the canonical repository root (`DEV_MEM_ISOLATE_WORKTREE=1` opts out), allowing parallel agents across branches/worktrees to share a single WAL-mode SQLite database (`graph.sqlite`) and `events.jsonl`. Standard single checkouts skip subprocess overhead via direct `.git` directory inspection.
+- **Cross-Session Live Inbox (`currentSessionId`):** When a hook supplies `currentSessionId`, recent sibling discoveries within `liveInboxWindowMinutes` (default `120`) receive a `1.15×` priority boost after topical relevance filtering so sibling worktrees surface freshly learned pitfalls immediately.
+- **GitHub PR Context & Green-Merge Verification (`dev-memo pr-context`):** Imports `.dev-mem/shared.jsonl` on fresh CI runners, checks changed files for `FailedApproach` regression risks and matching `Decision`/`Constraint`/`Convention` rules, emits an idempotent `<!-- dev-mem-pr-context -->` PR comment via `.github/actions/pr-context/action.yml`, and optionally promotes matching non-failure nodes to `verified` (`--verify-on-merge`) while refreshing `shared.jsonl` and `MEMORY.md`.
+
+---
+
 ## 7. Agent Adapters
 
 **Location:** `adapters/`
@@ -1208,6 +1220,7 @@ Hooks are **best-effort observers** and must never terminate or disrupt the host
 | `dev-memo prune` | Remove events from already-extracted sessions in `events.jsonl` | `dev-memo prune` |
 | `dev-memo sync` | Sync `shared.jsonl` and regenerate `.dev-mem/MEMORY.md` | `dev-memo sync` |
 | `dev-memo export --md` | Export `.dev-mem/MEMORY.md` and optional `--agents-md` pointer block | `dev-memo export --md --agents-md` |
+| `dev-memo pr-context` | Render PR context comment and verify nodes on green merge | `dev-memo pr-context --verify-on-merge` |
 | `dev-memo mcp` | Launch zero-daemon stdio Model Context Protocol (MCP) server | `dev-memo mcp` |
 | `dev-memo wrap <cmd> [args]` | Run a command and flush events on exit | `dev-memo wrap cursor-agent` |
 | `dev-memo uninstall [--purge]` | Remove hooks; `--purge` deletes `.dev-mem/` | `dev-memo uninstall --purge` |

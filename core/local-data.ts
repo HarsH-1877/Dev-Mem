@@ -23,15 +23,23 @@ export function resolveStorageRoot(projectRoot: string): string {
     return resolved;
   }
 
+  const dotGit = join(resolved, ".git");
   try {
-    const dotGit = join(resolved, ".git");
-    if (existsSync(dotGit) && statSync(dotGit).isDirectory()) {
+    if (!existsSync(dotGit)) {
+      return resolved;
+    }
+    const stat = statSync(dotGit);
+    if (stat.isDirectory()) {
+      return resolved;
+    }
+    if (!stat.isFile()) {
       return resolved;
     }
   } catch {
-    // fall through to git lookup
+    return resolved;
   }
 
+  // Only reached when `.git` is a file (linked git worktree).
   try {
     const raw = execFileSync("git", ["rev-parse", "--git-common-dir"], {
       cwd: resolved,

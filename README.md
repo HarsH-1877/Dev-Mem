@@ -280,6 +280,24 @@ dev-memo forget 3f2a1b4c --reason "Replaced by SQLite in V2"
 
 # Generate git-diffable .dev-mem/MEMORY.md and optionally refresh bounded AGENTS.md summary
 dev-memo export --md --agents-md
+
+# Generate PR review context or auto-verify touched nodes on green merge (used by GitHub Action)
+dev-memo pr-context --base origin/main --head HEAD
+```
+
+#### Parallel Worktree Sharing & Live Sibling Inbox
+
+When you run parallel coding agents inside `git worktree` checkouts, Dev-Mem resolves `git rev-parse --git-common-dir` automatically so every worktree shares one SQLite WAL graph and `events.jsonl` in the main repository root (override with `DEV_MEM_ISOLATE_WORKTREE=1`). Recent relevant discoveries captured by sibling sessions within the last 2 hours automatically receive a **live inbox** priority boost across active worktrees.
+
+#### GitHub PR Context Action
+
+Add Dev-Mem warnings and constraints directly to GitHub Pull Requests (and auto-verify touched nodes when PRs merge cleanly) using the bundled composite action at `.github/actions/pr-context`:
+
+```yaml
+- uses: HarsH-1877/Dev-Mem/.github/actions/pr-context@main
+  with:
+    base-ref: origin/${{ github.base_ref }}
+    verify-on-merge: "false"
 ```
 
 ---

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import {
   assertTransition,
+  canTransition,
   isLifecycleState,
   type LifecycleState,
 } from "../lifecycle/index.js";
@@ -21,6 +22,7 @@ import type {
   KnowledgeNode,
   LifecycleHistoryEntry,
   NodeType,
+  UpdateNodeInput,
 } from "./types.js";
 import { EDGE_TYPES, NODE_TYPES } from "./types.js";
 
@@ -34,6 +36,7 @@ export type {
   KnowledgeNode,
   LifecycleHistoryEntry,
   NodeType,
+  UpdateNodeInput,
 } from "./types.js";
 export { EDGE_TYPES, NODE_TYPES } from "./types.js";
 export { SCHEMA_SQL } from "./schema.js";
@@ -179,6 +182,37 @@ export class GraphStore {
     return row ? this.rowToNode(row) : undefined;
   }
 
+  updateNode(nodeId: string, patch: UpdateNodeInput): KnowledgeNode {
+    const existing = this.getNode(nodeId);
+    if (!existing) {
+      throw new Error(`Unknown node id: ${nodeId}`);
+    }
+
+    let nextTitle = existing.title;
+    if (patch.title !== undefined) {
+      if (typeof patch.title !== "string" || patch.title.trim() === "") {
+        throw new Error("title cannot be empty");
+      }
+      nextTitle = patch.title.trim();
+    }
+
+    const nextContent = patch.content !== undefined ? patch.content : existing.content;
+    const nextEvidence = patch.evidence !== undefined ? normalizeEvidence(patch.evidence) : existing.evidence;
+    const nextUpdatedAt = patch.updated_at ?? nowIso();
+
+    this.db
+      .prepare(
+        `UPDATE nodes SET title = ?, content = ?, evidence_json = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(nextTitle, nextContent, JSON.stringify(nextEvidence), nextUpdatedAt, nodeId);
+
+    const updated = this.getNode(nodeId);
+    if (!updated) {
+      throw new Error(`Node disappeared after update: ${nodeId}`);
+    }
+    return updated;
+  }
+
   createEdge(input: CreateEdgeInput): KnowledgeEdge {
     if (!isEdgeType(input.type)) {
       throw new Error(`Unknown edge type: ${String(input.type)}`);
@@ -235,6 +269,7 @@ export class GraphStore {
   transitionLifecycleState(
     nodeId: string,
     toState: LifecycleState,
+    updatedAt?: string,
   ): KnowledgeNode {
     if (!isLifecycleState(toState)) {
       throw new Error(`Unknown lifecycle state: ${String(toState)}`);
@@ -250,7 +285,7 @@ export class GraphStore {
       return node;
     }
 
-    const timestamp = nowIso();
+    const timestamp = updatedAt ?? nowIso();
     this.db
       .prepare(
         `UPDATE nodes SET lifecycle_state = ?, updated_at = ? WHERE id = ?`,

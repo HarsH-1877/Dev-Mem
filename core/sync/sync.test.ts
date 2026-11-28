@@ -293,4 +293,97 @@ describe("Git-friendly Team Memory Sync (.dev-mem/shared.jsonl)", () => {
       safeRm(root);
     }
   });
+
+  it("propagates content edits and superseded tombstones across team members (last-writer-wins)", () => {
+    const devA = mkdtempSync(join(tmpdir(), "dm-sync-tomb-a-"));
+    const devB = mkdtempSync(join(tmpdir(), "dm-sync-tomb-b-"));
+    try {
+      const t0 = "2026-10-16T00:00:00.000Z";
+      const t1 = "2026-10-17T00:00:00.000Z";
+      const storeA = new GraphStore({ projectRoot: devA });
+      const oldDecision = storeA.createNode({
+        type: "Decision",
+        title: "Use REST polling",
+        content: "Poll every 5s",
+        lifecycle_state: "active",
+        created_at: t0,
+        updated_at: t0,
+        evidence: {
+          commit: "1111111111111111111111111111111111111111",
+          files: ["src/api.ts"],
+          session_id: "s1",
+          agent: "claude-code",
+          timestamp: t0,
+          confidence: 0.9,
+        },
+      });
+      const editedConvention = storeA.createNode({
+        type: "Convention",
+        title: "Validate payloads",
+        content: "Initial version",
+        lifecycle_state: "active",
+        created_at: t0,
+        updated_at: t0,
+        evidence: {
+          commit: "1111111111111111111111111111111111111111",
+          files: ["src/api.ts"],
+          session_id: "s1",
+          agent: "claude-code",
+          timestamp: t0,
+          confidence: 0.9,
+        },
+      });
+      storeA.close();
+
+      // Initial sync devA -> devB
+      exportSharedGraph(devA);
+      mkdirSync(join(devB, ".dev-mem"), { recursive: true });
+      copyFileSync(getSharedGraphPath(devA), getSharedGraphPath(devB));
+      importSharedGraph(devB);
+
+      // Now Alice retires oldDecision via supersede AND updates editedConvention content
+      const storeA2 = new GraphStore({ projectRoot: devA });
+      const newDecision = storeA2.createNode({
+        type: "Decision",
+        title: "Use WebSockets instead of REST polling",
+        content: "Lower latency",
+        lifecycle_state: "active",
+        created_at: t1,
+        updated_at: t1,
+        evidence: {
+          commit: "2222222222222222222222222222222222222222",
+          files: ["src/api.ts"],
+          session_id: "s2",
+          agent: "claude-code",
+          timestamp: t1,
+          confidence: 0.95,
+        },
+      });
+      storeA2.createEdge({
+        from_id: newDecision.id,
+        to_id: oldDecision.id,
+        type: "supersedes",
+      });
+      storeA2.updateNode(editedConvention.id, {
+        content: "Validate payloads with Zod v4",
+        updated_at: t1,
+      });
+      storeA2.close();
+
+      exportSharedGraph(devA);
+      copyFileSync(getSharedGraphPath(devA), getSharedGraphPath(devB));
+      const imp2 = importSharedGraph(devB);
+      expect(imp2.importedNodes).toBe(1);
+      expect(imp2.updatedNodes).toBe(2);
+
+      const storeB = new GraphStore({ projectRoot: devB });
+      expect(storeB.getNode(oldDecision.id)?.lifecycle_state).toBe("superseded");
+      expect(storeB.getNode(newDecision.id)?.lifecycle_state).toBe("active");
+      expect(storeB.getNode(editedConvention.id)?.content).toBe("Validate payloads with Zod v4");
+      storeB.close();
+    } finally {
+      safeRm(devA);
+      safeRm(devB);
+    }
+  });
 });

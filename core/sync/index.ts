@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { GraphStore, type KnowledgeEdge, type KnowledgeNode } from "../graph/index.js";
+import { canTransition } from "../lifecycle/index.js";
 import { ensureLocalDataDir, getSharedGraphPath, SHARED_GRAPH_FILENAME } from "../local-data.js";
 
 export { SHARED_GRAPH_FILENAME, getSharedGraphPath };
@@ -31,7 +32,17 @@ export function exportSharedGraph(projectRoot: string): {
   try {
     const shareableNodes = store
       .queryAllNodes()
-      .filter((n) => n.lifecycle_state === "active" || n.lifecycle_state === "verified")
+      .filter((n) => {
+        if (n.lifecycle_state === "active" || n.lifecycle_state === "verified" || n.lifecycle_state === "superseded") {
+          return true;
+        }
+        if (n.lifecycle_state === "stale") {
+          // Export stale tombstones only if the node was previously curated/shared
+          const history = store.listLifecycleHistory(n.id);
+          return history.some((h) => h.to_state === "active" || h.to_state === "verified");
+        }
+        return false;
+      })
       .sort((a, b) => a.id.localeCompare(b.id));
 
     const nodeIdSet = new Set(shareableNodes.map((n) => n.id));
@@ -106,19 +117,59 @@ export function importSharedGraph(projectRoot: string): {
               content: rec.node.content,
               lifecycle_state: rec.node.lifecycle_state,
               evidence: rec.node.evidence,
+              created_at: rec.node.created_at,
+              updated_at: rec.node.updated_at,
             });
             importedNodes++;
           } catch {
             // Skip invalid node
           }
-        } else if (
-          existing.lifecycle_state === "observed" &&
-          (rec.node.lifecycle_state === "active" || rec.node.lifecycle_state === "verified")
-        ) {
-          try {
-            store.transitionLifecycleState(existing.id, rec.node.lifecycle_state);
+        } else {
+          const incomingTs = rec.node.updated_at ? Date.parse(rec.node.updated_at) : NaN;
+          const existingTs = existing.updated_at ? Date.parse(existing.updated_at) : NaN;
+          const isNewer = !Number.isNaN(incomingTs) && !Number.isNaN(existingTs) && incomingTs > existingTs;
+          const legacyPromotion =
+            existing.lifecycle_state === "observed" &&
+            (rec.node.lifecycle_state === "active" ||
+              rec.node.lifecycle_state === "verified" ||
+              rec.node.lifecycle_state === "superseded" ||
+              rec.node.lifecycle_state === "stale");
+
+          let didUpdate = false;
+          if (isNewer) {
+            const contentChanged =
+              rec.node.title !== existing.title ||
+              rec.node.content !== existing.content ||
+              JSON.stringify(rec.node.evidence) !== JSON.stringify(existing.evidence);
+            if (contentChanged) {
+              try {
+                store.updateNode(existing.id, {
+                  title: rec.node.title,
+                  content: rec.node.content,
+                  evidence: rec.node.evidence,
+                  updated_at: rec.node.updated_at,
+                });
+                didUpdate = true;
+              } catch {}
+            }
+            if (
+              rec.node.lifecycle_state !== existing.lifecycle_state &&
+              canTransition(existing.lifecycle_state, rec.node.lifecycle_state)
+            ) {
+              try {
+                store.transitionLifecycleState(existing.id, rec.node.lifecycle_state, rec.node.updated_at);
+                didUpdate = true;
+              } catch {}
+            }
+          } else if (legacyPromotion) {
+            try {
+              store.transitionLifecycleState(existing.id, rec.node.lifecycle_state, rec.node.updated_at);
+              didUpdate = true;
+            } catch {}
+          }
+          if (didUpdate) {
             updatedNodes++;
-          } catch {}
+          }
         }
       } else if (rec.record_type === "edge" && rec.edge?.id) {
         if (!existingEdges.has(rec.edge.id)) {

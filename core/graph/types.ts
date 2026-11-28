@@ -75,6 +75,13 @@ export interface CreateNodeInput {
   updated_at?: string;
 }
 
+export interface UpdateNodeInput {
+  title?: string;
+  content?: string;
+  evidence?: Evidence;
+  updated_at?: string;
+}
+
 export interface CreateEdgeInput {
   from_id: string;
   to_id: string;

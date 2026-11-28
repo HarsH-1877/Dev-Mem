@@ -1,5 +1,16 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { pruneExtractedEvents } from "../core/capture/compact.js";
+import { syncSharedGraph } from "../core/sync/index.js";
+import { getBanner } from "./banner.js";
+import { installHooks, uninstallHooks, findStaleHooks } from "./commands/install.js";
+import { runStatus, runDoctor } from "./commands/diagnostics.js";
+import { runQuery, runInspect } from "./commands/inspect.js";
+import { extractOnce, runWrap } from "./commands/extract.js";
+
 const COMMANDS = [
   "install",
   "status",
@@ -20,20 +31,7 @@ function isCommand(value: string): value is Command {
   return (COMMANDS as readonly string[]).includes(value);
 }
 
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, statSync, readdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { execFileSync, spawnSync } from "node:child_process";
-import { ensureLocalDataDir, getEventsLogPath, readLastExtractionLog } from "../core/local-data.js";
-import { GraphStore } from "../core/graph/index.js";
-import { acquireExtractionLock, markExtractionComplete } from "../core/extraction-lock.js";
-import { retrieveContext, generateInjectionString } from "../core/retrieval/index.js";
-import { buildResolverSource, HOOK_MARKER } from "./hook-resolver.js";
-import { resolveProviderForProject } from "../core/llm/index.js";
-import { pruneExtractedEvents } from "../core/capture/compact.js";
-import { syncSharedGraph } from "../core/sync/index.js";
-import { getBanner } from "./banner.js";
+export { findStaleHooks, runDoctor };
 
 export function runPrune(cwd: string): { removedEvents: number; keptEvents: number } {
   return pruneExtractedEvents(cwd);
@@ -41,642 +39,6 @@ export function runPrune(cwd: string): { removedEvents: number; keptEvents: numb
 
 export function runSync(cwd: string): { importedNodes: number; updatedNodes: number; exportedNodes: number } {
   return syncSharedGraph(cwd);
-}
-
-
-function adapterHook(adapter: "claude-code" | "codex" | "cursor"): string {
-  return `${buildResolverSource()}
-if (distDir) {
-  try { await import(pathToFileURL(join(distDir, "adapters", "${adapter}", "hook.js")).href); } catch {}
-}
-`;
-}
-
-function getHookScriptCode(_eventName: string): string { return adapterHook("claude-code"); }
-function getCodexHookScriptCode(_eventName: string): string { return adapterHook("codex"); }
-function getCursorHookScriptCode(_eventName: string): string { return adapterHook("cursor"); }
-
-function getOpenCodeHookScriptCode(): string {
-  return `import { spawnSync } from "node:child_process";
-${buildResolverSource()}
-
-export default async function DevMemPlugin(input, options) {
-  if (!distDir) return input;
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  const projectRoot = join(currentDir, "../.."); // up from .opencode/plugins/
-  const hookPath = fileURLToPath(pathToFileURL(join(distDir, "adapters/opencode/hook.js")));
-
-  function runHookSync(eventName, payload) {
-    try {
-      const res = spawnSync("node", [hookPath], {
-        input: JSON.stringify({ hook_event_name: eventName, cwd: projectRoot, ...payload }),
-        encoding: "utf8",
-      });
-      if (res.stdout) {
-        try {
-          const out = JSON.parse(res.stdout);
-          return out.hookSpecificOutput;
-        } catch (e) {}
-      }
-    } catch (e) {}
-    return null;
-  }
-
-  return {
-    "chat.message": async (pluginInput, output) => {
-      const res = runHookSync("chat.message", { session_id: pluginInput.sessionID, message: pluginInput.message });
-      if (res && res.additionalContext) {
-        output.message.parts.push({ type: "text", text: "\\n\\n" + res.additionalContext });
-      }
-    },
-    "tool.execute.after": async (pluginInput, output) => {
-      const res = runHookSync("tool.execute.after", {
-        session_id: pluginInput.sessionID,
-        callID: pluginInput.callID,
-        tool: pluginInput.tool,
-        args: pluginInput.args,
-        output: output.output,
-        metadata: output.metadata,
-      });
-      if (res && res.additionalContext) {
-        // We can append warning to output if necessary, but typically we just log it in dev-mem
-      }
-    },
-    event: async ({ event }) => {
-      if (event.type === "session.status" && (event.properties || event.data)?.status?.type === "idle") {
-        runHookSync("session.idle", { session_id: event.properties?.sessionID || event.data?.sessionID || "unknown" });
-      }
-    }
-  };
-}
-`;
-}
-
-function installClaudeCodeHooks(cwd: string) {
-  const claudeDir = join(cwd, ".claude");
-  if (!existsSync(claudeDir)) {
-    mkdirSync(claudeDir, { recursive: true });
-  }
-
-  const hooksDir = join(claudeDir, "hooks");
-  if (!existsSync(hooksDir)) {
-    mkdirSync(hooksDir, { recursive: true });
-  }
-
-  const events = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"];
-  const hookConfigs: Record<string, any[]> = {};
-
-  for (const event of events) {
-    const scriptName = `dev-mem-${event.toLowerCase().replace(/([A-Z])/g, '-$1').replace(/^-/, '')}.js`;
-    const scriptPath = join(hooksDir, scriptName);
-    writeFileSync(scriptPath, getHookScriptCode(event), "utf8");
-
-    hookConfigs[event] = [
-      {
-        hooks: [
-          {
-            type: "command",
-            command: "node",
-            args: [`\${CLAUDE_PROJECT_DIR}/.claude/hooks/${scriptName}`]
-          }
-        ]
-      }
-    ];
-  }
-
-  const settingsPath = join(claudeDir, "settings.json");
-  let settings: any = {};
-  if (existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-    } catch {}
-  }
-
-  if (!settings.hooks) settings.hooks = {};
-
-  for (const event of events) {
-    if (!settings.hooks[event]) settings.hooks[event] = [];
-    const existing = settings.hooks[event].find((h: any) => h.hooks && h.hooks[0] && h.hooks[0].args && h.hooks[0].args[0].includes("dev-mem"));
-    if (!existing) {
-      settings.hooks[event].push(hookConfigs[event][0]);
-    }
-  }
-
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
-}
-
-function installCodexHooks(cwd: string) {
-  const codexDir = join(cwd, ".codex");
-  if (!existsSync(codexDir)) {
-    mkdirSync(codexDir, { recursive: true });
-  }
-
-  const hooksDir = join(codexDir, "hooks");
-  if (!existsSync(hooksDir)) {
-    mkdirSync(hooksDir, { recursive: true });
-  }
-
-  // Both Claude Code and Codex support PreToolUse.
-  const events = ["SessionStart", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"];
-
-  for (const event of events) {
-    const scriptName = `dev-mem-${event.toLowerCase().replace(/([A-Z])/g, '-$1').replace(/^-/, '')}.js`;
-    const scriptPath = join(hooksDir, scriptName);
-    writeFileSync(scriptPath, getCodexHookScriptCode(event), "utf8");
-  }
-
-  // Codex uses .codex/hooks.json — separate file, not embedded in a settings file.
-  const hooksJsonPath = join(codexDir, "hooks.json");
-  let hooksJson: any = { hooks: {} };
-  if (existsSync(hooksJsonPath)) {
-    try {
-      hooksJson = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
-      if (!hooksJson.hooks) hooksJson.hooks = {};
-    } catch {}
-  }
-
-  for (const event of events) {
-    const scriptName = `dev-mem-${event.toLowerCase().replace(/([A-Z])/g, '-$1').replace(/^-/, '')}.js`;
-    if (!hooksJson.hooks[event]) hooksJson.hooks[event] = [];
-
-    const existing = hooksJson.hooks[event].find((h: any) => {
-      const cmd: string = h.command ?? (Array.isArray(h.hooks) ? h.hooks[0]?.command : "");
-      return cmd && cmd.includes("dev-mem");
-    });
-
-    if (!existing) {
-      const entry: any = {
-        type: "command",
-        command: `node .codex/hooks/${scriptName}`,
-        // Explicitly use SECONDS (Codex standard) to guarantee max window.
-        timeout: 3
-      };
-      
-      if (event === "SessionEnd") {
-        // We use detached spawn internally anyway, but we set async: true
-        // just to be compliant with best practices for non-blocking hooks.
-        // It has no effect on SessionEnd specifically (which is always sync).
-        entry.async = true;
-      }
-      hooksJson.hooks[event].push(entry);
-    }
-  }
-
-  writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2), "utf8");
-}
-
-function installCursorHooks(cwd: string) {
-  const cursorDir = join(cwd, ".cursor");
-  if (!existsSync(cursorDir)) {
-    mkdirSync(cursorDir, { recursive: true });
-  }
-
-  const hooksDir = join(cursorDir, "hooks");
-  if (!existsSync(hooksDir)) {
-    mkdirSync(hooksDir, { recursive: true });
-  }
-
-  // Cursor uses camelCase event names. sessionEnd is omitted (unreliable).
-  const events = ["sessionStart", "preToolUse", "postToolUse", "stop"];
-
-  for (const event of events) {
-    const scriptName = `dev-mem-${event.toLowerCase()}.js`;
-    const scriptPath = join(hooksDir, scriptName);
-    writeFileSync(scriptPath, getCursorHookScriptCode(event), "utf8");
-  }
-
-  const hooksJsonPath = join(cursorDir, "hooks.json");
-  let hooksJson: any = { version: 1, hooks: {} };
-  if (existsSync(hooksJsonPath)) {
-    try {
-      hooksJson = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
-      if (!hooksJson.hooks) hooksJson.hooks = {};
-    } catch {}
-  }
-
-  for (const event of events) {
-    const scriptName = `dev-mem-${event.toLowerCase()}.js`;
-    if (!hooksJson.hooks[event]) hooksJson.hooks[event] = [];
-
-    const existing = hooksJson.hooks[event].find((h: any) => {
-      const cmd: string = h.command ?? "";
-      return cmd && cmd.includes("dev-mem");
-    });
-
-    if (!existing) {
-      hooksJson.hooks[event].push({
-        command: `node .cursor/hooks/${scriptName}`,
-        matcher: "*",
-        timeout: 3
-      });
-    }
-  }
-
-  writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2), "utf8");
-}
-
-function installOpenCodeHooks(cwd: string) {
-  const opencodeDir = join(cwd, ".opencode");
-  if (!existsSync(opencodeDir)) {
-    mkdirSync(opencodeDir, { recursive: true });
-  }
-
-  const pluginsDir = join(opencodeDir, "plugins");
-  if (!existsSync(pluginsDir)) {
-    mkdirSync(pluginsDir, { recursive: true });
-  }
-
-  const scriptPath = join(pluginsDir, "dev-mem.ts");
-  writeFileSync(scriptPath, getOpenCodeHookScriptCode(), "utf8");
-
-  const configPath = join(opencodeDir, "opencode.json");
-  let config: any = {};
-  if (existsSync(configPath)) {
-    try {
-      config = JSON.parse(readFileSync(configPath, "utf8"));
-    } catch {}
-  }
-
-  if (!config.plugin) config.plugin = [];
-  if (!Array.isArray(config.plugin)) config.plugin = [config.plugin];
-  
-  // OpenCode auto-loads local plugins from .opencode/plugins/* but registering it is safe
-  const hasPlugin = config.plugin.some((p: any) => 
-    p === "dev-mem" || (Array.isArray(p) && p[0] === "dev-mem") ||
-    p === "./.opencode/plugins/dev-mem.ts" || (Array.isArray(p) && p[0] === "./.opencode/plugins/dev-mem.ts")
-  );
-
-  if (!hasPlugin) {
-    config.plugin.push("./.opencode/plugins/dev-mem.ts");
-  }
-
-  writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
-}
-
-function installHooks(cwd: string, requestedAgents: string[]) {
-  const installedAgents: string[] = [];
-  const validAgents = ["claude-code", "codex", "cursor", "opencode"];
-
-  const explicitAgents = requestedAgents.map(a => a.toLowerCase());
-  for (const agent of explicitAgents) {
-    if (!validAgents.includes(agent)) {
-      throw new Error(`Invalid agent: ${agent}. Supported agents: ${validAgents.join(", ")}`);
-    }
-  }
-
-  const explicit = explicitAgents.length > 0;
-
-  const claudePresent = explicit ? explicitAgents.includes("claude-code") : existsSync(join(cwd, ".claude"));
-  const codexPresent = explicit ? explicitAgents.includes("codex") : existsSync(join(cwd, ".codex"));
-  const cursorPresent = explicit ? explicitAgents.includes("cursor") : existsSync(join(cwd, ".cursor"));
-  const opencodePresent = explicit ? explicitAgents.includes("opencode") : (existsSync(join(cwd, ".opencode")) || existsSync(join(cwd, "opencode.json")));
-
-  // Default to claude-code if none found and no explicit agents requested.
-  const defaultedToClaude = !explicit && !claudePresent && !codexPresent && !cursorPresent && !opencodePresent;
-  if (claudePresent || defaultedToClaude) {
-    installClaudeCodeHooks(cwd);
-    installedAgents.push("claude-code");
-  }
-
-  if (codexPresent) {
-    installCodexHooks(cwd);
-    installedAgents.push("codex");
-  }
-
-  if (cursorPresent) {
-    installCursorHooks(cwd);
-    installedAgents.push("cursor");
-  }
-
-  if (opencodePresent) {
-    installOpenCodeHooks(cwd);
-    installedAgents.push("opencode");
-  }
-
-  ensureLocalDataDir(cwd);
-  try {
-    const currentDir = dirname(fileURLToPath(import.meta.url));
-    const distDir = join(currentDir, "..").replace(/\\/g, "/");
-    writeFileSync(join(cwd, ".dev-mem", "install-path.txt"), distDir, "utf8");
-  } catch (e) {}
-
-  return { installedAgents, defaultedToClaude };
-}
-
-function uninstallOpenCodeHooks(cwd: string) {
-  const opencodeDir = join(cwd, ".opencode");
-  const configPath = join(opencodeDir, "opencode.json");
-
-  if (existsSync(configPath)) {
-    try {
-      const config = JSON.parse(readFileSync(configPath, "utf8"));
-      if (Array.isArray(config.plugin)) {
-        config.plugin = config.plugin.filter((p: any) => {
-          const name = Array.isArray(p) ? p[0] : p;
-          return name !== "dev-mem" && !name.includes("dev-mem.ts");
-        });
-        writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
-      }
-    } catch {}
-  }
-
-  const pluginPath = join(opencodeDir, "plugins", "dev-mem.ts");
-  if (existsSync(pluginPath)) rmSync(pluginPath);
-}
-
-function uninstallCodexHooks(cwd: string) {
-  const codexDir = join(cwd, ".codex");
-  const hooksJsonPath = join(codexDir, "hooks.json");
-
-  if (existsSync(hooksJsonPath)) {
-    try {
-      const hooksJson = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
-      if (hooksJson.hooks) {
-        for (const event of Object.keys(hooksJson.hooks)) {
-          hooksJson.hooks[event] = hooksJson.hooks[event].filter((h: any) => {
-            const cmd: string = h.command ?? "";
-            return !cmd.includes("dev-mem");
-          });
-          if (hooksJson.hooks[event].length === 0) {
-            delete hooksJson.hooks[event];
-          }
-        }
-      }
-      writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2), "utf8");
-    } catch {}
-  }
-
-  const hooksDir = join(codexDir, "hooks");
-  if (existsSync(hooksDir)) {
-    const events = ["SessionStart", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"];
-    for (const event of events) {
-      const scriptName = `dev-mem-${event.toLowerCase().replace(/([A-Z])/g, '-$1').replace(/^-/, '')}.js`;
-      const scriptPath = join(hooksDir, scriptName);
-      if (existsSync(scriptPath)) rmSync(scriptPath);
-    }
-  }
-}
-
-function uninstallCursorHooks(cwd: string) {
-  const cursorDir = join(cwd, ".cursor");
-  const hooksJsonPath = join(cursorDir, "hooks.json");
-
-  if (existsSync(hooksJsonPath)) {
-    try {
-      const hooksJson = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
-      if (hooksJson.hooks) {
-        for (const event of Object.keys(hooksJson.hooks)) {
-          hooksJson.hooks[event] = hooksJson.hooks[event].filter((h: any) => {
-            const cmd: string = h.command ?? "";
-            return !cmd.includes("dev-mem");
-          });
-          if (hooksJson.hooks[event].length === 0) {
-            delete hooksJson.hooks[event];
-          }
-        }
-      }
-      writeFileSync(hooksJsonPath, JSON.stringify(hooksJson, null, 2), "utf8");
-    } catch {}
-  }
-
-  const hooksDir = join(cursorDir, "hooks");
-  if (existsSync(hooksDir)) {
-    const events = ["sessionStart", "preToolUse", "postToolUse", "stop"];
-    for (const event of events) {
-      const scriptName = `dev-mem-${event.toLowerCase()}.js`;
-      const scriptPath = join(hooksDir, scriptName);
-      if (existsSync(scriptPath)) rmSync(scriptPath);
-    }
-  }
-}
-
-function uninstallHooks(cwd: string, purge: boolean) {
-  // Claude Code
-  const claudeDir = join(cwd, ".claude");
-  const settingsPath = join(claudeDir, "settings.json");
-
-  if (existsSync(settingsPath)) {
-    try {
-      const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-      if (settings.hooks) {
-        for (const event of Object.keys(settings.hooks)) {
-          settings.hooks[event] = settings.hooks[event].filter((h: any) => !(h.hooks && h.hooks[0] && h.hooks[0].args && h.hooks[0].args[0].includes("dev-mem")));
-          if (settings.hooks[event].length === 0) {
-            delete settings.hooks[event];
-          }
-        }
-      }
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
-    } catch {}
-  }
-
-  const claudeHooksDir = join(claudeDir, "hooks");
-  if (existsSync(claudeHooksDir)) {
-    const events = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"];
-    for (const event of events) {
-      const scriptName = `dev-mem-${event.toLowerCase().replace(/([A-Z])/g, '-$1').replace(/^-/, '')}.js`;
-      const scriptPath = join(claudeHooksDir, scriptName);
-      if (existsSync(scriptPath)) rmSync(scriptPath);
-    }
-  }
-
-  // Codex
-  if (existsSync(join(cwd, ".codex"))) {
-    uninstallCodexHooks(cwd);
-  }
-
-  // Cursor
-  if (existsSync(join(cwd, ".cursor"))) {
-    uninstallCursorHooks(cwd);
-  }
-
-  // OpenCode
-  if (existsSync(join(cwd, ".opencode")) || existsSync(join(cwd, "opencode.json"))) {
-    uninstallOpenCodeHooks(cwd);
-  }
-
-  if (purge) {
-    const devMemDir = join(cwd, ".dev-mem");
-    if (existsSync(devMemDir)) {
-      rmSync(devMemDir, { recursive: true, force: true });
-    }
-  }
-}
-
-
-export function findStaleHooks(cwd: string): string[] {
-  const locations: Array<[string, RegExp]> = [
-    [".claude/hooks", /^dev-mem-.*\.js$/],
-    [".codex/hooks", /^dev-mem-.*\.js$/],
-    [".cursor/hooks", /^dev-mem-.*\.js$/],
-    [".opencode/plugins", /^dev-mem.*\.[jt]s$/],
-  ];
-  const stale: string[] = [];
-  for (const [rel, pattern] of locations) {
-    const dir = join(cwd, rel);
-    if (!existsSync(dir)) continue;
-    let names: string[];
-    try {
-      names = readdirSync(dir);
-    } catch {
-      continue;
-    }
-    for (const name of names) {
-      if (!pattern.test(name)) continue;
-      try {
-        if (!readFileSync(join(dir, name), "utf8").includes(HOOK_MARKER)) stale.push(`${rel}/${name}`);
-      } catch {}
-    }
-  }
-  return stale;
-}
-
-function runStatus(cwd: string): string {
-  let output = "";
-  try {
-    const store = new GraphStore({ projectRoot: cwd });
-    output += "Nodes:\n";
-    let totalNodes = 0;
-    const lifecycleCounts: Record<string, number> = {};
-    const types = ["Decision", "FailedApproach", "Constraint", "Discovery", "Convention", "OpenIssue"];
-    for (const type of types) {
-      const nodes = store.queryByType(type as any);
-      totalNodes += nodes.length;
-      if (nodes.length > 0) {
-        output += `- ${type}: ${nodes.length}\n`;
-      }
-      for (const n of nodes) {
-        lifecycleCounts[n.lifecycle_state] = (lifecycleCounts[n.lifecycle_state] || 0) + 1;
-      }
-    }
-    output += `\nTotal Nodes: ${totalNodes}\n`;
-    output += "\nLifecycle States:\n";
-    for (const [state, count] of Object.entries(lifecycleCounts)) {
-      output += `- ${state}: ${count}\n`;
-    }
-    store.close();
-  } catch (e: any) {
-    output += `GraphStore Error: ${e.message}\n`;
-  }
-  
-  const logPath = getEventsLogPath(cwd);
-  if (existsSync(logPath)) {
-    const stat = statSync(logPath);
-    output += `\nLast capture: ${stat.mtime.toISOString()}\n`;
-  } else {
-    output += "\nLast capture: None\n";
-  }
-
-  const lastExt = readLastExtractionLog(cwd);
-  if (lastExt) {
-    output += lastExt.success
-      ? `Last extraction: ${lastExt.timestamp} — ok (${lastExt.nodes_created} nodes via ${lastExt.provider})\n`
-      : `Last extraction: ${lastExt.timestamp} — FAILED (${lastExt.error || "unknown error"})\n`;
-  } else {
-    output += "Last extraction: None\n";
-  }
-
-  const stale = findStaleHooks(cwd);
-  if (stale.length > 0) {
-    output += `\n⚠ ${stale.length} Dev-Mem hook file(s) use the old format (machine-specific paths):\n`
-      + stale.map((s) => `  - ${s}`).join("\n")
-      + "\nRun `dev-memo install` to upgrade them.\n";
-  }
-
-  return output;
-}
-
-export async function runDoctor(cwd: string, opts: { live?: boolean } = {}): Promise<{ ok: boolean; lines: string[] }> {
-  const lines: string[] = [];
-  let ok = true;
-  const fail = (m: string) => { ok = false; lines.push(`✗ ${m}`); };
-
-  try {
-    execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, stdio: "ignore" });
-    lines.push("✓ Git repository");
-  } catch { fail("Not a git repository"); }
-
-  const agents = [
-    ["claude-code", ".claude/hooks"], ["codex", ".codex/hooks"],
-    ["cursor", ".cursor/hooks"], ["opencode", ".opencode/plugins"],
-  ].filter(([, rel]) => {
-    try {
-      return existsSync(join(cwd, rel)) &&
-        readdirSync(join(cwd, rel)).some((f) => f.startsWith("dev-mem"));
-    } catch {
-      return false;
-    }
-  }).map(([a]) => a);
-  lines.push(agents.length ? `✓ Hooks: ${agents.join(", ")}` : "! No agent hooks installed — run dev-memo install");
-
-  const stale = findStaleHooks(cwd);
-  lines.push(stale.length ? `! ${stale.length} stale hook file(s) — run dev-memo install` : "✓ Hooks up to date");
-
-  const probeDir = mkdtempSync(join(tmpdir(), "dm-doctor-"));
-  let found = "";
-  try {
-    const probe = join(probeDir, "probe.mjs");
-    writeFileSync(probe, `${buildResolverSource()}\nprocess.stdout.write(distDir);\n`);
-    const res = spawnSync(process.execPath, [probe], { cwd, encoding: "utf8", timeout: 5000 });
-    found = (res.stdout || "").trim();
-  } finally {
-    rmSync(probeDir, { recursive: true, force: true });
-  }
-  if (found) lines.push(`✓ dev-memo found at ${found}`); else fail("Hooks cannot locate dev-memo");
-
-  const provider = resolveProviderForProject(cwd);
-  if (!provider) {
-    fail("No LLM provider configured");
-  } else {
-    lines.push(`✓ LLM provider: ${provider.name}`);
-    if (opts.live) {
-      let timer: NodeJS.Timeout;
-      const timeoutPromise = new Promise((_, rej) => {
-        timer = setTimeout(() => rej(new Error("timeout after 15s")), 15000);
-        timer.unref?.();
-      });
-      try {
-        await Promise.race([provider.complete("Reply with OK.", "OK", 5), timeoutPromise]);
-        lines.push("✓ LLM reachable");
-      } catch (e) {
-        fail(`LLM call failed: ${(e as Error).message}`);
-      } finally {
-        clearTimeout(timer!);
-      }
-    }
-  }
-  const lastExt = readLastExtractionLog(cwd);
-  if (lastExt && !lastExt.success) {
-    lines.push(`! Last extraction failed (${lastExt.timestamp}): ${lastExt.error || "unknown error"}`);
-  }
-
-  return { ok, lines };
-}
-
-import { runExtraction } from "../core/extraction/index.js";
-
-async function extractOnce(cwd: string, sessionId: string): Promise<{ skipped: boolean; success: boolean }> {
-  let release: (() => void) | null;
-  try {
-    release = acquireExtractionLock(cwd, sessionId);
-  } catch (error) {
-    console.error(`[dev-memo] Unable to prepare extraction lock for ${sessionId}: ${(error as Error).message}`);
-    return { skipped: true, success: false };
-  }
-  if (!release) {
-    console.error(`[dev-memo] Extraction already running or complete for session ${sessionId}; skipping duplicate trigger`);
-    return { skipped: true, success: true };
-  }
-  try {
-    const result = await runExtraction({ projectRoot: cwd, sessionId });
-    if (result.success) {
-      markExtractionComplete(cwd, sessionId);
-      pruneExtractedEvents(cwd);
-    }
-    return { skipped: false, success: result.success };
-  } finally {
-    release();
-  }
 }
 
 /** Reads the version from package.json (works from both cli/ source and dist/cli/ build). */
@@ -721,7 +83,7 @@ function helpText(): string {
 
 export async function runCli(
   argv: string[],
-  options: { cwd?: string } = {}
+  options: { cwd?: string } = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const [command, ...args] = argv;
 
@@ -734,11 +96,7 @@ export async function runCli(
   }
 
   if (!command) {
-    return {
-      exitCode: 0,
-      stdout: helpText(),
-      stderr: "",
-    };
+    return { exitCode: 0, stdout: helpText(), stderr: "" };
   }
 
   if (!isCommand(command)) {
@@ -762,16 +120,13 @@ export async function runCli(
         out += `\n[Notice for Cursor]: Cursor CLI lacks a reliable SessionEnd event.\nDev-Memo uses an N-accumulated-events trigger (default 10) instead.\nFor a perfect flush when exiting, run your agent via: dev-memo wrap cursor-agent <args>\n`;
       }
       return { exitCode: 0, stdout: out, stderr: "" };
-
     } else if (command === "status") {
-      const output = runStatus(cwd);
-      return { exitCode: 0, stdout: output + "\n", stderr: "" };
+      return { exitCode: 0, stdout: runStatus(cwd) + "\n", stderr: "" };
     } else if (command === "doctor") {
       const r = await runDoctor(cwd, { live: args.includes("--live") });
       return { stdout: r.lines.join("\n") + "\n", stderr: "", exitCode: r.ok ? 0 : 1 };
     } else if (command === "uninstall") {
-      const purge = args.includes("--purge");
-      uninstallHooks(cwd, purge);
+      uninstallHooks(cwd, args.includes("--purge"));
       return { exitCode: 0, stdout: "dev-memo hooks uninstalled\n", stderr: "" };
     } else if (command === "extract") {
       const sessionId = args[0];
@@ -787,102 +142,11 @@ export async function runCli(
       }
       return { exitCode: 0, stdout: "Extraction complete\n", stderr: "" };
     } else if (command === "wrap") {
-      if (args.length === 0) {
-        return { exitCode: 1, stdout: "", stderr: "Usage: dev-memo wrap <command> [args...]\n" };
-      }
-      return new Promise((resolve) => {
-        import("node:child_process").then(({ spawn }) => {
-          const isWin = process.platform === "win32";
-          const child = spawn(args[0], args.slice(1), { stdio: "inherit", shell: isWin });
-          
-          child.on("close", async (code) => {
-            try {
-              const { EventLog } = await import("../core/capture/log.js");
-              const log = new EventLog({ persistPath: join(cwd, ".dev-mem", "events.jsonl") });
-              const events = log.getEvents();
-              if (events.length > 0) {
-                const lastSessionId = events[events.length - 1].session_id;
-                if (lastSessionId) {
-                  process.stdout.write(`\n[dev-memo] Wrapping complete. Flushing remaining events for session ${lastSessionId}...\n`);
-                  await extractOnce(cwd, lastSessionId);
-                }
-              }
-            } catch (e: any) {
-              process.stderr.write(`[dev-memo] Wrap flush error: ${e.message}\n`);
-            }
-            resolve({ exitCode: code ?? 0, stdout: "", stderr: "" });
-          });
-        });
-      });
+      return await runWrap(cwd, args);
     } else if (command === "query") {
-      const text = args[0];
-      if (!text) {
-        return { exitCode: 1, stdout: "", stderr: "Usage: dev-memo query \"<task description>\"\n" };
-      }
-      const nodes = retrieveContext({ projectRoot: cwd, currentTask: text });
-      const out = generateInjectionString(nodes);
-      if (!out) {
-        return { exitCode: 0, stdout: "No relevant context found in graph.\n", stderr: "" };
-      }
-      return { exitCode: 0, stdout: out + "\n", stderr: "" };
-
+      return runQuery(cwd, args[0]);
     } else if (command === "inspect") {
-      const nodeId = args[0];
-      if (!nodeId) {
-        return { exitCode: 1, stdout: "", stderr: "Usage: dev-memo inspect <node-id>\n" };
-      }
-      const store = new GraphStore({ projectRoot: cwd });
-      let out: string;
-      try {
-        const node = store.getNode(nodeId);
-        if (!node) {
-          return { exitCode: 1, stdout: "", stderr: `Node not found: ${nodeId}\n` };
-        }
-        const history = store.listLifecycleHistory(nodeId);
-        const edges = store.listEdges(nodeId);
-
-        const lines: string[] = [];
-        lines.push(`id:              ${node.id}`);
-        lines.push(`type:            ${node.type}`);
-        lines.push(`lifecycle_state: ${node.lifecycle_state}`);
-        lines.push(`title:           ${node.title}`);
-        lines.push(`content:         ${node.content || "(empty)"}`);
-        lines.push(`created_at:      ${node.created_at}`);
-        lines.push(`updated_at:      ${node.updated_at}`);
-        lines.push("");
-        lines.push("evidence:");
-        lines.push(`  commit:     ${node.evidence.commit}`);
-        lines.push(`  files:      ${node.evidence.files.join(", ")}`);
-        if (node.evidence.diff_ref) lines.push(`  diff_ref:   ${node.evidence.diff_ref}`);
-        if (node.evidence.test_ref) lines.push(`  test_ref:   ${node.evidence.test_ref}`);
-        if (node.evidence.symbols?.length) lines.push(`  symbols:    ${node.evidence.symbols.join(", ")}`);
-        lines.push(`  session_id: ${node.evidence.session_id}`);
-        lines.push(`  agent:      ${node.evidence.agent}`);
-        lines.push(`  timestamp:  ${node.evidence.timestamp}`);
-        lines.push(`  confidence: ${node.evidence.confidence.toFixed(2)}`);
-
-        lines.push("");
-        lines.push("lifecycle_history:");
-        for (const h of history) {
-          const from = h.from_state ?? "(created)";
-          lines.push(`  ${h.timestamp}  ${from} → ${h.to_state}`);
-        }
-
-        if (edges.length > 0) {
-          lines.push("");
-          lines.push("edges:");
-          for (const e of edges) {
-            const dir = e.from_id === node.id ? "→" : "←";
-            const other = e.from_id === node.id ? e.to_id : e.from_id;
-            lines.push(`  [${e.type}] ${dir} ${other}`);
-          }
-        }
-
-        out = lines.join("\n") + "\n";
-      } finally {
-        store.close();
-      }
-      return { exitCode: 0, stdout: out, stderr: "" };
+      return runInspect(cwd, args[0]);
     } else if (command === "prune") {
       const { removedEvents, keptEvents } = runPrune(cwd);
       return {
@@ -906,7 +170,6 @@ export async function runCli(
     return { exitCode: 1, stdout: "", stderr: e.message + "\n" };
   }
 
-  // Should not be reached — all commands in COMMANDS have explicit branches above.
   return { exitCode: 1, stdout: "", stderr: `Command "${command}" is not yet implemented.\n` };
 }
 
@@ -918,17 +181,14 @@ const isDirectRun =
     process.argv[1].endsWith("dev-memo"));
 
 if (isDirectRun) {
-  runCli(process.argv.slice(2)).then((result) => {
-    if (result.stdout) {
-      process.stdout.write(result.stdout);
-    }
-    if (result.stderr) {
-      process.stderr.write(result.stderr);
-    }
-    process.exit(result.exitCode);
-  }).catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+  runCli(process.argv.slice(2))
+    .then((result) => {
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
 }
-

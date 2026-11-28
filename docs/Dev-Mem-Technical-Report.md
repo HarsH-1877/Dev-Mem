@@ -1,6 +1,6 @@
 # Dev-Mem — Technical Report
 
-**Version:** 0.5.0 (Correctness & Zero-Key Extraction)  
+**Version:** 0.6.0 (Zero-Friction Init & Cold-Start Bootstrap)  
 **Date:** November 2026  
 **Author:** Harsh Asalkar  
 **Repository:** [github.com/HarsH-1877/Dev-Mem](https://github.com/HarsH-1877/Dev-Mem)  
@@ -27,6 +27,7 @@
    - 6.8 LLM Provider Abstraction
    - 6.9 Zero-Daemon Model Context Protocol (MCP) Server
    - 6.10 Git-Friendly Team Memory Sync (`.dev-mem/shared.jsonl`)
+   - 6.11 Deterministic Cold-Start Bootstrap (`core/bootstrap/`)
 7. [Agent Adapters](#7-agent-adapters)
 8. [CLI Interface](#8-cli-interface)
 9. [Evaluation Methodology & Results](#9-evaluation-methodology--results)
@@ -102,17 +103,19 @@ Dev-Mem is an **npm CLI package** with an internal core library and per-agent ad
 ┌─────────────────────────────────────────────────────┐
 │                    dev-memo (npm)                    │
 ├─────────────┬──────────────────┬────────────────────┤
-│  CLI Layer  │   Core Library   │  Agent Adapters    │
 │  cli/       │   core/          │  adapters/         │
+│  commands/  │                  │                    │
 │             │                  │                    │
-│  install    │  graph store     │  claude-code/      │
-│  status     │  capture         │  codex/            │
-│  query      │  extraction      │  cursor/           │
-│  inspect    │  retrieval       │  opencode/         │
-│  uninstall  │  regression      │                    │
-│  extract    │  consistency     │                    │
-│  wrap       │  lifecycle       │                    │
-│             │  llm             │                    │
+│  init       │  graph store     │  claude-code/      │
+│  bootstrap  │  capture         │  codex/            │
+│  install    │  bootstrap       │  cursor/           │
+│  status     │  extraction      │  opencode/         │
+│  query      │  retrieval       │                    │
+│  inspect    │  regression      │                    │
+│  uninstall  │  consistency     │                    │
+│  extract    │  lifecycle       │                    │
+│  wrap       │  llm             │                    │
+│  sync / mcp │  mcp / sync      │                    │
 └─────────────┴──────────────────┴────────────────────┘
 ```
 
@@ -1076,6 +1079,18 @@ To eliminate manual coordination overhead, Dev-Mem integrates shared graph synch
 
 ---
 
+### 6.11 Deterministic Cold-Start Bootstrap (`core/bootstrap/`)
+
+**Location:** `core/bootstrap/index.ts`  
+**CLI Command:** `dev-memo bootstrap [--from <file>]` (also run automatically during `dev-memo init`)
+
+In v0.6.0, Dev-Mem eliminates the cold-start problem so freshly initialized repositories already provide actionable engineering context before the first coding session runs:
+- **Git Revert Mining (`FailedApproach`):** Scans recent repository commits for `Revert "..."` or `revert: ...` patterns, recovers the files modified by the revert via `git show --name-only`, and inserts grounded `FailedApproach` nodes in `observed` state.
+- **Instruction File Mining (`Constraint` / `Convention`):** Parses `AGENTS.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, `.cursorrules`, `.cursor/rules/*`, `.github/copilot-instructions.md`, and optional `--from <path>` files (ignoring code fences and generated `<!-- dev-mem:* -->` blocks). Prohibitions (`never`, `do not`, `avoid`, `forbid`) map to `Constraint`; affirmative rules map to `Convention`.
+- **Secret Scrubbing & Idempotency:** All mined text passes through `sanitizeText()` and is deduplicated against normalized existing node titles in `GraphStore`. Uses `$0` LLM calls by default.
+
+---
+
 ## 7. Agent Adapters
 
 **Location:** `adapters/`
@@ -1163,8 +1178,10 @@ Hooks are **best-effort observers** and must never terminate or disrupt the host
 
 | Command | Purpose | Example |
 |---------|---------|---------|
-| `dev-memo install` | Detect agents, wire hooks, create `.dev-mem/` | `dev-memo install` |
-| `dev-memo status` | Show graph size, lifecycle breakdown, last capture | `dev-memo status` |
+| `dev-memo init [agent...]` | One-step setup: install hooks, register MCP configs, verify backend, and bootstrap | `dev-memo init` |
+| `dev-memo install [agent...]` | Detect or target agents, wire hooks, create `.dev-mem/` | `dev-memo install` |
+| `dev-memo bootstrap [--from f]` | Mine git reverts and repo instruction files into starter nodes ($0 LLM cost) | `dev-memo bootstrap` |
+| `dev-memo status` | Show graph size, lifecycle breakdown, last capture & extraction | `dev-memo status` |
 | `dev-memo doctor [--live]` | Check git, hooks currency, resolver health, and LLM configuration | `dev-memo doctor --live` |
 | `dev-memo query "<text>"` | Preview what context would be injected for a task | `dev-memo query "optimize database queries"` |
 | `dev-memo inspect <node-id>` | Full detail of a single node | `dev-memo inspect c4a1e9b2-...` |
@@ -1381,11 +1398,9 @@ dev-memo inspect <node-id>
 
 ## 11. Current Gaps & Limitations
 
-### 11.1 Detection-Based Installation
+### 11.1 Zero-Friction Setup & CLI Detection (Addressed in v0.6.0)
 
-Dev-Mem's `install` command detects agent directories (`.claude/`, `.cursor/`, `.codex/`) to decide which hooks to install. **Neither Codex nor Cursor automatically create these directories.** If no agent directory is found, Dev-Mem defaults to Claude Code only. Users must manually create the directories before installing hooks for those agents.
-
-**Mitigation needed:** `dev-memo install --agent codex` or `dev-memo install --all` to create directories automatically.
+In v0.6.0, `dev-memo init [agent...]` infers `claude-code` or `codex` from installed host CLIs on `PATH` when no `.claude/`, `.codex/`, `.cursor/`, or `.opencode/` directories exist yet, creates missing agent directories automatically, registers `dev-memo mcp`, verifies the extraction backend, and seeds initial project memory via `dev-memo bootstrap`. Explicit agent lists (`dev-memo init codex cursor`) remain supported.
 
 ### 11.2 No Embedding-Based Retrieval
 

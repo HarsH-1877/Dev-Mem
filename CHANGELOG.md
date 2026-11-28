@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 — 2026-11-28
+
+### Added
+- **One-Command Setup (`dev-memo init`)**: Wires lifecycle hooks, registers `dev-memo mcp` in project MCP configuration files (`.mcp.json`, `.cursor/mcp.json`, `opencode.json` / `.opencode/opencode.json`), verifies the extraction backend, and runs cold-start bootstrap in one step. Automatically infers `claude-code` or `codex` from installed host CLIs when no agent config directory exists yet. Supports `--no-mcp` and `--no-bootstrap`.
+- **Zero-Cost Cold-Start Bootstrap (`dev-memo bootstrap`)**: Deterministic repository seeding (`core/bootstrap/index.ts`, also exported at `dev-memo/bootstrap`) that mines recent Git revert commits into `FailedApproach` nodes and project instruction files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.cursor/rules/*`, `.github/copilot-instructions.md`, or `--from <path>`) into `Constraint` / `Convention` nodes with secret redaction and duplicate skipping.
+
+### Changed
+- **Modular CLI Architecture**: Split monolithic `cli/index.ts` into cohesive command modules under `cli/commands/` (`init.ts`, `install.ts`, `bootstrap.ts`, `diagnostics.ts`, `inspect.ts`, `extract.ts`).
+
 ## 0.5.0 — 2026-11-28
 
 ### Added

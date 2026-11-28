@@ -45,20 +45,23 @@ Dev-Mem gives your AI coding agents (Claude Code, Cursor, OpenCode, Codex, and M
 
 ---
 
-## Install
+## Quick Start (`dev-memo init`)
 
-Install Dev-Mem globally to make the `dev-memo` command available everywhere:
+Install Dev-Mem globally (or run with `npx`):
 
 ```bash
 npm install -g dev-memo
+dev-memo init
 ```
 
-Then, run this once per project from the project root to wire the agent hooks:
+`dev-memo init` sets up everything in one step:
+1. Detects your installed agents (or infers from `claude` / `codex` on your `PATH`; pass explicit agents like `dev-memo init cursor` if desired).
+2. Wires lifecycle hooks and ensures `.dev-mem/` is configured properly in `.gitignore`.
+3. Automatically registers `dev-memo mcp` in project MCP configs (`.mcp.json`, `.cursor/mcp.json`, `opencode.json`).
+4. Verifies your extraction backend (zero-key host CLI, API key, or Ollama).
+5. Runs `dev-memo bootstrap` to seed starter memories from past Git reverts and repo rule files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`) so your very first prompt already has context.
 
-```bash
-dev-memo install
-```
-*(Or, if you prefer not to install globally, you can prefix all commands in this guide with `npx dev-memo`)*
+*(Use `--no-mcp` or `--no-bootstrap` to skip those steps, or run `dev-memo install [agent...]` to manage only hooks.)*
 
 Dev-Mem automatically detects which agent directories exist in your project. However, since agents like Codex and Cursor do not auto-create their directories in every repository by default, **you can explicitly specify your agent**:
 
@@ -104,6 +107,23 @@ After upgrading, run `dev-memo install` once in each project to register the new
 ---
 
 ## CLI commands
+
+### `dev-memo bootstrap [--from <file>]`
+
+Mines recent Git revert commits (`FailedApproach` nodes) and repository instruction files (`AGENTS.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, `.cursorrules`, `.cursor/rules/*`, `.github/copilot-instructions.md`) into starter `Constraint` and `Convention` nodes with zero LLM API cost. Automatically deduplicates against existing graph nodes so re-running is safe.
+
+```bash
+dev-memo bootstrap
+# Include personal Claude auto-memory or extra notes:
+dev-memo bootstrap --from ~/.claude/projects/<id>/memory/MEMORY.md
+```
+
+Example output:
+```
+Bootstrapped 7 memory node(s) (reverts: 2, rules: 5, skipped duplicates: 0).
+```
+
+---
 
 ### `dev-memo status`
 

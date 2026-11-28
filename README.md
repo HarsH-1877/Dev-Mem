@@ -11,7 +11,7 @@
 
 **Persistent local knowledge store for AI coding agents**
 <p align="center">
-  <i>Preserves development context and catches repeated mistakes across Claude Code, Cursor, Codex, and OpenCode.</i>
+  <i>Preserves development context and catches repeated mistakes across Claude Code, Cursor, Codex, OpenCode, and Antigravity.</i>
 </p>
 
 [![npm version](https://img.shields.io/npm/v/dev-memo?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/dev-memo)
@@ -23,11 +23,11 @@
 
 ---
 
-Dev-Mem gives your AI coding agents (**Claude Code, Codex, Cursor, OpenCode, and MCP tools**) a persistent, evidence-backed engineering memory that survives session restarts, agent switches, and parallel Git worktrees.
+Dev-Mem gives your AI coding agents (**Claude Code, Codex, Cursor, OpenCode, Antigravity, and MCP tools**) a persistent, evidence-backed engineering memory that survives session restarts, agent switches, and parallel Git worktrees.
 
 - **Stop repeating solved investigations:** Relevant architectural decisions, constraints, and discoveries inject automatically at session start and prompt time via SQLite FTS5 + BM25 search.
 - **Catch regressions before editing broken paths:** Mid-session file guards warn when you touch files tied to past `FailedApproach` rollbacks — gated by topical similarity and deduplicated per session.
-- **Day-one memory with zero extra API keys:** `dev-memo init` wires hooks + MCP, seeds starter rules from Git reverts and `CLAUDE.md` / `AGENTS.md` / `.cursorrules` at `$0` cost, and extracts new session knowledge using your already-authenticated host CLI (`claude`, `codex`, `gemini`) — or optional API keys / local Ollama.
+- **Day-one memory with zero extra API keys:** `dev-memo init` wires hooks + MCP, seeds starter rules from Git reverts and `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.cursorrules` at `$0` cost, and extracts new session knowledge using your already-authenticated host CLI (`claude`, `codex`, `agy`) — or optional API keys / local Ollama.
 - **Human governance & Git team sync:** Review pending memories (`dev-memo review`), sync compact tombstoned state (`.dev-mem/shared.jsonl` + git-diffable `.dev-mem/MEMORY.md`), comment on GitHub PRs (`.github/actions/pr-context`), track ROI (`dev-memo stats`), and inspect the graph offline (`dev-memo view`).
 - **100% local & lightweight:** Zero background daemons, zero open network ports, `better-sqlite3` as the sole runtime dependency, and automatic secret/privacy redaction.
 
@@ -36,11 +36,11 @@ Dev-Mem gives your AI coding agents (**Claude Code, Codex, Cursor, OpenCode, and
 ## Requirements
 
 - Node.js 22+
-- A project using **Claude Code**, **Codex**, **Cursor**, or **OpenCode** (or any MCP-compatible client)
+- A project using **Claude Code**, **Codex**, **Cursor**, **OpenCode**, or **Antigravity** (or any MCP-compatible client)
 - An extraction backend — **no extra API key needed** if you already have one of these CLIs authenticated on your `PATH`:
   - `claude` (Claude Code CLI)
   - `codex` (Codex CLI)
-  - `gemini` (Gemini CLI)
+  - `agy` (Antigravity CLI)
 - Optional direct API key / local model fallback:
   - `ANTHROPIC_API_KEY` (default: `claude-haiku-4-5`)
   - `OPENAI_API_KEY` (default: `gpt-5-mini`)
@@ -57,11 +57,11 @@ dev-memo init
 ```
 
 `dev-memo init` sets up your repo in one command:
-1. Detects installed agents (or infers `claude-code` / `codex` from your `PATH`; pass explicit names like `dev-memo init cursor` if needed).
+1. Detects installed agents (or infers `claude-code` / `codex` / `antigravity` from your `PATH`; pass explicit names like `dev-memo init cursor` or `dev-memo init antigravity` if needed).
 2. Wires lifecycle hooks and updates `.gitignore` (`.dev-mem/*` ignored locally while un-ignoring `.dev-mem/shared.jsonl` and `.dev-mem/MEMORY.md`).
-3. Registers `dev-memo mcp` in `.mcp.json`, `.cursor/mcp.json`, and `opencode.json`.
-4. Verifies your extraction backend (`cli-claude`, `cli-codex`, `cli-gemini`, API key, or Ollama).
-5. Runs `dev-memo bootstrap` to mine past Git reverts and repository rules (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`) so your very first prompt already has context.
+3. Registers `dev-memo mcp` in `.mcp.json`, `.cursor/mcp.json`, `.agents/mcp_config.json`, and `opencode.json` (or `.opencode/opencode.json`).
+4. Verifies your extraction backend (`cli-claude`, `cli-codex`, `cli-agy`, API key, or Ollama).
+5. Runs `dev-memo bootstrap` to mine past Git reverts and repository rules (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`, `.cursor/rules/*`, `.agents/rules/*.md`, `.github/copilot-instructions.md`) so your very first prompt already has context.
 
 *(Pass `--no-mcp` or `--no-bootstrap` to skip those steps, or use `dev-memo install [agent...]` to manage only hooks.)*
 
@@ -71,6 +71,7 @@ dev-memo init
 | `codex` | `.codex/hooks.json` + `.codex/hooks/` (`SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `SessionEnd`) |
 | `cursor` | `.cursor/hooks.json` + `.cursor/hooks/` (`SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`) |
 | `opencode` | `.opencode/plugins/dev-mem.ts` + `opencode.json` (`chat.message`, `tool.execute.after`, `session.idle`) |
+| `antigravity` (alias `agy`) | `.agents/hooks.json` + `.agents/hooks/` (`SessionStart`, `PreInvocation`, `PreToolUse`, `PostToolUse`, `Stop`) |
 
 If multiple agent directories exist, hooks are installed for all of them. Running `dev-memo install` again is safe and idempotent.
 
@@ -94,7 +95,7 @@ dev-memo view --open
 
 ### `dev-memo bootstrap [--from <file>]`
 
-Mines recent Git revert commits (`FailedApproach` nodes) and repository instruction files (`AGENTS.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, `.cursorrules`, `.cursor/rules/*`, `.github/copilot-instructions.md`) into starter `Constraint` and `Convention` nodes with zero LLM API cost. Automatically deduplicates against existing graph nodes so re-running is safe.
+Mines recent Git revert commits (`FailedApproach` nodes) and repository instruction files (`AGENTS.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, `GEMINI.md`, `.agents/rules/*.md`, `.cursorrules`, `.cursor/rules/*`, `.github/copilot-instructions.md`) into starter `Constraint` and `Convention` nodes with zero LLM API cost. Automatically deduplicates against existing graph nodes so re-running is safe.
 
 ```bash
 dev-memo bootstrap
@@ -438,6 +439,19 @@ In your `opencode.json`:
 }
 ```
 
+##### 5. Antigravity
+`dev-memo init antigravity` automatically writes `.agents/mcp_config.json`:
+```json
+{
+  "mcpServers": {
+    "dev-memo": {
+      "command": "npx",
+      "args": ["-y", "dev-memo", "mcp"]
+    }
+  }
+}
+```
+
 ---
 
 ## Configuration
@@ -471,11 +485,11 @@ Once hooks are installed, every agent session does this without any manual steps
 
 **At session start** — Dev-Mem reads the local graph, scores stored knowledge nodes against the current working-tree state (which files are modified, what the session title is), selects the highest-scoring nodes within the token budget, and injects them into the agent's context. Per-session deduplication tracks all injected nodes so subsequent turns never repeat them. If any stored `FailedApproach` nodes match files you're about to work on, a regression warning is injected first.
 
-**At prompt submission (Claude Code `UserPromptSubmit`, OpenCode `chat.message`)** — As the task evolves across turns, Dev-Mem filters strictly on topical relevance (`minRelevance >= 0.08`) against the submitted prompt text and applies type-aware freshness decay (`Constraint`/`Convention` persist long-term while ephemeral `Discovery`/`OpenIssue` decay faster). Built-in per-session deduplication (`.dev-mem/sessions/<session-id>.injected.json`) ensures only new, un-injected relevant nodes are injected once per session.
+**At prompt submission (Claude Code `UserPromptSubmit`, Antigravity `PreInvocation`, OpenCode `chat.message`)** — As the task evolves across turns, Dev-Mem filters strictly on topical relevance (`minRelevance >= 0.08`) against the submitted prompt text and applies type-aware freshness decay (`Constraint`/`Convention` persist long-term while ephemeral `Discovery`/`OpenIssue` decay faster). Built-in per-session deduplication (`.dev-mem/sessions/<session-id>.injected.json`) ensures only new, un-injected relevant nodes are injected once per session.
 
-**During the session** — Every tool call (file writes, shell commands) is recorded to `.dev-mem/events.jsonl`. All events are scrubbed before storage: API keys (Anthropic, OpenAI, Gemini, GitHub, AWS, Slack, Bearer tokens, `.env` credentials) and `<private>...</private>` tags are automatically redacted. For Claude Code and Codex, this includes both pre- and post-execution snapshots. For Cursor, post-execution only. Mid-session regression checks also run on file writes, gated by topical similarity on partial file overlaps and deduplicated per session (`.dev-mem/sessions/<session-id>.warnings.json`) so hub files never trigger repeated warning spam.
+**During the session** — Every tool call (file writes, shell commands) is recorded to `.dev-mem/events.jsonl`. All events are scrubbed before storage: API keys (Anthropic, OpenAI, Gemini, GitHub, AWS, Slack, Bearer tokens, `.env` credentials) and `<private>...</private>` tags are automatically redacted. For Claude Code, Codex, and Antigravity (`PreToolUse`/`PostToolUse`), this includes pre- and post-execution context/regression checks (Antigravity `PreToolUse` returns `{"decision":"allow"}` with optional `additionalContext`). For Cursor, post-execution capture only. Mid-session regression checks also run on file writes, gated by topical similarity on partial file overlaps and deduplicated per session (`.dev-mem/sessions/<session-id>.warnings.json`) so hub files never trigger repeated warning spam.
 
-**At session end (Claude Code, Codex)** — Dev-Mem runs a deterministic compaction pass (stripping duplicate reads, collapsing consecutive status checks, and capping passing tool output) to reduce token overhead by 70–90%, followed by a single batched call (using your already-authenticated host CLI or configured API key) that extracts typed knowledge nodes and verifies surviving nodes only when corroborated by passing tests or commit advancement. Every run records its status and any errors to `.dev-mem/extraction.log` so diagnostics are always visible in `dev-memo status`.
+**At session end (Claude Code, Codex, Antigravity `Stop`)** — Dev-Mem runs a deterministic compaction pass (stripping duplicate reads, collapsing consecutive status checks, and capping passing tool output) to reduce token overhead by 70–90%, followed by a single batched call (using your already-authenticated host CLI or configured API key) that extracts typed knowledge nodes and verifies surviving nodes only when corroborated by passing tests or commit advancement. Every run records its status and any errors to `.dev-mem/extraction.log` so diagnostics are always visible in `dev-memo status`.
 
 **After N tool calls (Cursor)** — Same extraction step, triggered mid-session every N completed tool calls (default 10) rather than at session end.
 

@@ -81,7 +81,7 @@ function helpText(): string {
     "",
     "Commands:",
     "  init [agent...]      One-step setup: install hooks, wire MCP, verify backend, and bootstrap starter memory",
-    "  install [agent...]   Install hooks (claude-code, codex, cursor, opencode); auto-detects if omitted",
+    "  install [agent...]   Install hooks (claude-code, codex, cursor, opencode, antigravity); auto-detects if omitted",
     "  bootstrap [--from f] Mine git reverts, CLAUDE.md/AGENTS.md & --claude-memory ($0 cost)",
     "  status               Show graph and capture status",
     "  stats [--json]       Show injections, prevented regressions, and verification stats",

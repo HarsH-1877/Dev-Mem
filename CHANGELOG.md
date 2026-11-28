@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 — 2026-11-28
+
+### Added
+- **Antigravity CLI & IDE Lifecycle Adapter (`adapters/antigravity/`)**: Added native `.agents/hooks.json` (`dev-memo` group with flat lifecycle entries `SessionStart`, `PreInvocation`, `Stop` and matcher-wrapped tool entries `PreToolUse`, `PostToolUse`) and `.agents/hooks/dev-mem-*.js` hook scripts. Normalizes Antigravity camelCase payloads (`conversationId`, `workspacePaths`, `toolCall`, `toolOutput`, `exitCode`), runs prompt-time delta injection on `PreInvocation`, performs mutation regression checks on `PreToolUse` / `PostToolUse` (emitting `{"decision":"allow"}` + optional `additionalContext` and failing open on internal errors), and spawns detached extraction on `Stop`.
+- **CLI, MCP & Diagnostics Support (`cli/commands/install.ts`, `cli/commands/init.ts`, `cli/commands/diagnostics.ts`)**: Added `antigravity` (and `agy` alias) support to `dev-memo init` (auto-inferred when `agy` is on `PATH` and no agent directories exist), `dev-memo install` (auto-detected when `.agents/` or `GEMINI.md` exists), `dev-memo uninstall`, `findStaleHooks()`, `dev-memo doctor`, and `.agents/mcp_config.json` MCP registration.
+- **`GEMINI.md` & `.agents/rules/*.md` Bootstrap Mining (`core/bootstrap/index.ts`)**: `dev-memo bootstrap` now mines `GEMINI.md` and `.agents/rules/*.md` into starter `Constraint` and `Convention` nodes at `$0` LLM cost.
+
+### Changed
+- **Host CLI Backend Replacement (`core/llm/cli-agent.ts`, `core/llm/index.ts`)**: Replaced the deprecated `gemini` CLI (`cli-gemini`) backend with **Antigravity CLI (`agy` / `cli-agy`)** across `PATH` detection (`where.exe` on Windows / `which` on POSIX), headless command construction (`agy -p ...` with prompt via `stdin`), and session-agent mapping (`antigravity` / `agy`). Explicit `cli-gemini` configs continue to route to `cli-agy` for backwards compatibility, while direct `GEMINI_API_KEY` / `GOOGLE_API_KEY` REST fallback (`core/llm/gemini.ts`) remains unchanged.
+
 ## 1.0.0 — 2026-11-28
 
 ### Added

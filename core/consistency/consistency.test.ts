@@ -221,14 +221,14 @@ describe("Symbol-level staleness and lifecycle promotion (v0.4)", () => {
     }
   });
 
-  it("promotes observed nodes to active when their files survive a follow-up session", () => {
+  it("promotes observed Decision/Convention to active only with passing tests or commit evidence, never FailedApproach or OpenIssue", () => {
     const dir = mkdtempSync(join(tmpdir(), "dm-promote-"));
     try {
       mkdirSync(join(dir, "src"), { recursive: true });
       writeFileSync(join(dir, "src", "db.ts"), "export const pool = {};\n", "utf8");
 
       const store = new GraphStore({ projectRoot: dir });
-      const node = store.createNode({
+      const decision = store.createNode({
         type: "Decision",
         title: "Use connection pooling in db.ts",
         content: "Prevents connection exhaustion",
@@ -242,16 +242,75 @@ describe("Symbol-level staleness and lifecycle promotion (v0.4)", () => {
           confidence: 0.9,
         },
       });
+      const failed = store.createNode({
+        type: "FailedApproach",
+        title: "Raw SQL without pooling",
+        content: "Exhausted connections",
+        lifecycle_state: "observed",
+        evidence: {
+          commit: "1111111111111111111111111111111111111111",
+          files: ["src/db.ts"],
+          session_id: "s1",
+          agent: "claude-code",
+          timestamp: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      });
+      const issue = store.createNode({
+        type: "OpenIssue",
+        title: "Pool timeout under load",
+        content: "Needs tuning",
+        lifecycle_state: "observed",
+        evidence: {
+          commit: "1111111111111111111111111111111111111111",
+          files: ["src/db.ts"],
+          session_id: "s1",
+          agent: "claude-code",
+          timestamp: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      });
       store.close();
 
-      const promoted = promoteSurvivingNodes(dir, ["src/db.ts"]);
-      expect(promoted).toContain(node.id);
+      // Mere file touch without tests/commit evidence must NOT promote anything
+      expect(promoteSurvivingNodes(dir, ["src/db.ts"])).toEqual([]);
+
+      // Passing tests promote Decision, but NEVER FailedApproach or OpenIssue
+      const promoted = promoteSurvivingNodes(dir, ["src/db.ts"], undefined, undefined, {
+        verifiedByTests: true,
+      });
+      expect(promoted).toEqual([decision.id]);
 
       const store2 = new GraphStore({ projectRoot: dir });
-      expect(store2.getNode(node.id)?.lifecycle_state).toBe("active");
+      expect(store2.getNode(decision.id)?.lifecycle_state).toBe("active");
+      expect(store2.getNode(failed.id)?.lifecycle_state).toBe("observed");
+      expect(store2.getNode(issue.id)?.lifecycle_state).toBe("observed");
       store2.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("skips staleness check for ungrounded nodes (evidence.grounded === false)", () => {
+    const store = new GraphStore({ dbPath, ephemeral: true });
+    const ungrounded = store.createNode({
+      type: "Convention",
+      title: "Global team convention",
+      content: "Not bound to a specific file",
+      lifecycle_state: "observed",
+      evidence: {
+        commit: "0000000000000000000000000000000000000000",
+        files: ["(ungrounded)"],
+        grounded: false,
+        session_id: "s1",
+        agent: "claude-code",
+        timestamp: new Date().toISOString(),
+        confidence: 0.8,
+      },
+    });
+    store.close();
+
+    const res = checkStaleness(tmpDir, dbPath);
+    expect(res.markedStale).not.toContain(ungrounded.id);
   });
 });

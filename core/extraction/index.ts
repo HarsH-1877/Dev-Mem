@@ -103,8 +103,10 @@ export async function runExtraction(options: ExtractionOptions): Promise<Extract
       }
     }
 
+    const hasRealCommit = Boolean(headCommit);
+    const hasSessionFiles = touchedFilesSet.size > 0;
     const fallbackCommit = headCommit || "0000000000000000000000000000000000000000";
-    const fallbackFiles = touchedFilesSet.size > 0 ? Array.from(touchedFilesSet) : ["README.md"];
+    const fallbackFiles = hasSessionFiles ? Array.from(touchedFilesSet) : ["(ungrounded)"];
 
     // 2b. Fetch existing active nodes for contradiction detection
     let existingContextStr = "";
@@ -303,13 +305,12 @@ ${compactedEvents.map((e) => JSON.stringify(e)).join("\n")}
 
       const content = typeof rawNode.content === "string" ? rawNode.content : "";
 
-      // Ensure files array has at least one valid path per §5.4
-      let files = Array.isArray(rawNode.files)
+      // Ensure files array has at least one path per §5.4; flag ungrounded nodes
+      const rawFiles = Array.isArray(rawNode.files)
         ? rawNode.files.filter((f: any) => typeof f === "string" && f.trim() !== "")
         : [];
-      if (files.length === 0) {
-        files = [...fallbackFiles];
-      }
+      const grounded = rawFiles.length > 0 || hasSessionFiles || hasRealCommit;
+      const files = rawFiles.length > 0 ? rawFiles : [...fallbackFiles];
 
       // Confidence clamped to [0.0, 1.0] per §5.4
       let confidence = 0.8;
@@ -342,6 +343,9 @@ ${compactedEvents.map((e) => JSON.stringify(e)).join("\n")}
       }
       if (typeof rawNode.test_ref === "string" && rawNode.test_ref.trim() !== "") {
         input.evidence.test_ref = rawNode.test_ref.trim();
+      }
+      if (!grounded) {
+        input.evidence.grounded = false;
       }
 
       try {
@@ -469,9 +473,28 @@ ${compactedEvents.map((e) => JSON.stringify(e)).join("\n")}
       console.error(`[dev-mem] Staleness check failed: ${sErr.message}`);
     }
 
-    // Promote surviving observed nodes whose cited files were touched and exist on disk
+    // Promote surviving observed nodes when cited files pass tests or advance commit
+    const TEST_CMD_RE = /\b(vitest|jest|pytest|mocha|ava|tap|cargo\s+test|go\s+test|(?:npm|pnpm|yarn|bun)\s+test|node\s+--test)\b/i;
+    const sessionHadPassingTests = sessionEvents.some((e) => {
+      if (e.type !== "tool_call") return false;
+      const tc = e as ToolCallEvent;
+      if (tc.exit_code !== 0) return false;
+      if (tc.test_pass === true) return true;
+      return TEST_CMD_RE.test([tc.command, ...(tc.args ?? [])].join(" "));
+    });
+    const sessionCommitCount = new Set(
+      sessionEvents
+        .filter((e) => e.type === "git_snapshot")
+        .map((e) => (e as GitSnapshotEvent).head_commit)
+        .filter(Boolean),
+    ).size;
+
     try {
-      promoteSurvivingNodes(projectRoot, Array.from(touchedFilesSet), insertedIds);
+      promoteSurvivingNodes(projectRoot, Array.from(touchedFilesSet), insertedIds, undefined, {
+        verifiedByTests: sessionHadPassingTests,
+        verifiedByCommit: sessionCommitCount > 1,
+        currentCommit: headCommit ?? undefined,
+      });
     } catch (pErr: any) {
       console.error(`[dev-mem] Node promotion failed: ${pErr.message}`);
     }

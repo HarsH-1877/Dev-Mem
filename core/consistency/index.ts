@@ -190,10 +190,11 @@ export function checkStaleness(
       if (excludeSet.has(node.id)) {
         continue;
       }
-      // Only check nodes that can become stale
+      // Only check nodes that can become stale and are grounded to real files
       if (
         node.lifecycle_state === "stale" ||
-        node.lifecycle_state === "superseded"
+        node.lifecycle_state === "superseded" ||
+        node.evidence.grounded === false
       ) {
         continue;
       }
@@ -251,15 +252,29 @@ export function checkStaleness(
   return result;
 }
 
+export interface PromoteOptions {
+  /** Session included a passing test command (`exit_code === 0`). */
+  verifiedByTests?: boolean;
+  /** Session recorded a new git commit after the node's evidence commit. */
+  verifiedByCommit?: boolean;
+  /** Current HEAD commit of the follow-up session. */
+  currentCommit?: string;
+}
+
+const NON_PROMOTABLE_TYPES = new Set(["FailedApproach", "OpenIssue"]);
+
 /**
- * Promotes `observed` nodes to `active` when a subsequent session touches or
- * validates their cited files and the files still exist on disk.
+ * Promotes `observed` nodes to `active` when a subsequent session touches their
+ * cited files, the files still exist on disk, and real corroborating evidence
+ * (passing tests or commit advancement) is present. Never auto-promotes
+ * `FailedApproach` or `OpenIssue` nodes, or ungrounded nodes.
  */
 export function promoteSurvivingNodes(
   projectRoot: string,
   touchedFiles: string[],
   excludeNodeIds?: string[],
   dbPath?: string,
+  options?: PromoteOptions,
 ): string[] {
   const promoted: string[] = [];
   if (touchedFiles.length === 0) return promoted;
@@ -274,6 +289,15 @@ export function promoteSurvivingNodes(
     for (const node of allNodes) {
       if (excludeSet.has(node.id)) continue;
       if (node.lifecycle_state !== "observed") continue;
+      if (NON_PROMOTABLE_TYPES.has(node.type)) continue;
+      if (node.evidence.grounded === false) continue;
+
+      const commitAdvanced = Boolean(
+        options?.verifiedByCommit ||
+        (options?.currentCommit && node.evidence.commit && options.currentCommit !== node.evidence.commit)
+      );
+      const hasEvidence = Boolean(options?.verifiedByTests) || commitAdvanced;
+      if (!hasEvidence) continue;
 
       const touchesExistingFile = (node.evidence.files || []).some(
         (f) => touchedSet.has(norm(f)) && existsSync(join(projectRoot, f))

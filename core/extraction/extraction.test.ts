@@ -413,7 +413,7 @@ describe("Batched LLM Extraction (spec §7.2)", () => {
     }
   });
 
-  it("promotes surviving observed nodes when touched files survive subsequent session extraction", async () => {
+  it("promotes surviving observed nodes when touched files pass tests in subsequent session", async () => {
     const store = new GraphStore({ projectRoot: testDir });
     const existingNode = store.createNode({
       type: "Decision",
@@ -439,6 +439,7 @@ describe("Batched LLM Extraction (spec §7.2)", () => {
     });
     capture.startSession();
     capture.recordFileTouch("README.md", "modified");
+    capture.recordToolCall({ command: "npm test", args: [], exit_code: 0, stdout: "passed" });
     capture.endSession();
 
     const result = await runExtraction({
@@ -453,6 +454,41 @@ describe("Batched LLM Extraction (spec §7.2)", () => {
       expect(verifyStore.getNode(existingNode.id)?.lifecycle_state).toBe("active");
     } finally {
       verifyStore.close();
+    }
+  });
+
+  it("marks extracted nodes as ungrounded (grounded: false) when neither files nor commit exist", async () => {
+    const noGitDir = mkdtempSync(join(tmpdir(), "dev-mem-nogit-"));
+    try {
+      const sessionId = "sess-ungrounded";
+      const capture = new DeterministicCapture({
+        projectRoot: noGitDir,
+        agent: "claude-code",
+        sessionId,
+      });
+      capture.startSession();
+      capture.endSession();
+
+      const result = await runExtraction({
+        projectRoot: noGitDir,
+        sessionId,
+        customLlmResponse: JSON.stringify({
+          nodes: [
+            {
+              type: "Convention",
+              title: "General coding style",
+              content: "Prefer pure functions",
+              files: [],
+              confidence: 0.8,
+            },
+          ],
+        }),
+      });
+      expect(result.success).toBe(true);
+      expect(result.nodes).toHaveLength(1);
+      expect(result.nodes[0].evidence.grounded).toBe(false);
+    } finally {
+      rmSync(noGitDir, { recursive: true, force: true });
     }
   });
 });

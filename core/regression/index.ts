@@ -53,8 +53,8 @@ export function checkRegressionRisk(ctx: RegressionCheckContext): RegressionMatc
   const normalizedCurrentFiles = new Set(currentFiles.map(norm));
 
   for (const node of failedNodes) {
-    // Skip nodes that are superseded or stale — already resolved.
-    if (node.lifecycle_state === "superseded" || node.lifecycle_state === "stale") {
+    // Skip nodes that are superseded, stale, or ungrounded.
+    if (node.lifecycle_state === "superseded" || node.lifecycle_state === "stale" || node.evidence.grounded === false) {
       continue;
     }
 
